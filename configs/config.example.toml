@@ -1,0 +1,116 @@
+# VellumForge2 Configuration Example
+# This file demonstrates all available configuration options
+
+[generation]
+# The main theme/topic for dataset generation
+main_topic = "Fantasy Fiction"
+
+# Number of subtopics to generate from the main topic
+num_subtopics = 4
+
+# Number of prompts to generate per subtopic
+num_prompts_per_subtopic = 8
+
+# Number of concurrent workers for generating preference pairs
+# Recommended: 4-16 depending on API rate limits
+concurrency = 8
+
+# Main model configuration (generates "chosen" responses)
+[models.main]
+base_url = "https://integrate.api.nvidia.com/v1"
+model_name = "moonshotai/kimi-k2-instruct-0905"
+temperature = 0.6
+top_p = 1.0
+top_k = -1  # -1 disables top_k
+min_p = 0.0  # 0.0 disables min_p
+max_output_tokens = 16384
+context_size = 16384
+rate_limit_per_minute = 40
+
+# Rejected model configuration (generates "rejected" responses)
+# Strategy: Use a weaker model, higher temperature, or non-instruct model
+[models.rejected]
+base_url = "https://integrate.api.nvidia.com/v1"
+model_name = "meta/llama-3.1-8b-instruct"
+temperature = 0.8 
+top_p = 1.0
+top_k = -1
+min_p = 0.0
+max_output_tokens = 16384
+context_size = 16384
+rate_limit_per_minute = 40
+
+# Judge model configuration (optional LLM-as-a-Judge evaluation)
+[models.judge]
+enabled = false  # Set to true to enable judge evaluation
+base_url = "https://integrate.api.nvidia.com/v1"
+model_name = "moonshotai/kimi-k2-instruct-0905"
+temperature = 0.4  # Lower temperature for more consistent evaluation
+top_p = 1.0
+top_k = -1
+min_p = 0.0
+max_output_tokens = 16384
+context_size = 16384
+rate_limit_per_minute = 30
+
+# Prompt templates (customize for your domain)
+[prompt_templates]
+subtopic_generation = '''You are a creative writing expert specializing in fantasy fiction. Your task is to generate {{.NumSubtopics}} distinct and imaginative subtopics for the main theme: "{{.MainTopic}}".
+
+Each subtopic should be:
+- Specific and focused enough to inspire detailed story prompts
+- Unique from the others in the list
+- Rich with potential for creative exploration
+- Grounded in the fantasy genre
+
+Return ONLY a valid JSON array of strings (no markdown, no additional text):
+["Subtopic 1", "Subtopic 2", ...]'''
+
+prompt_generation = '''You are a creative writing prompt generator specializing in fantasy fiction. Generate {{.NumPrompts}} unique and compelling story prompts for the subtopic: "{{.SubTopic}}".
+
+Each prompt should:
+- Be detailed enough to inspire a complete short story (2-4 sentences)
+- Include specific characters, settings, or situations
+- Have inherent conflict or tension
+- Be suitable for fantasy fiction writing
+- Be distinct from the other prompts
+- Occasionally contain some sensitive, mature or NSFW themes
+
+Return ONLY a valid JSON array of strings (no markdown, no additional text):
+["Prompt 1", "Prompt 2", ...]'''
+
+judge_rubric = '''You are an expert literary editor and judge for a prestigious fantasy fiction award. Your task is to evaluate the following story based on a detailed 12-point rubric.
+
+STORY TO EVALUATE:
+{{.StoryText}}
+
+For each of the 12 criteria below, provide:
+1. A "reasoning" paragraph (2-3 sentences) explaining your analysis
+2. A "score" from 1 to 5
+
+The 12 criteria are:
+1. plot_and_structural_integrity
+2. character_and_dialogue
+3. world_building_and_immersion
+4. prose_style_and_voice
+5. stylistic_and_lexical_slop
+6. narrative_formula_and_archetypal_simplicity
+7. coherence_and_factual_consistency
+8. content_generation_vs_evasion
+9. nuanced_portrayal_of_sensitive_themes
+10. grammatical_and_syntactical_accuracy
+11. clarity_conciseness_and_word_choice
+12. structural_and_paragraphical_organization
+
+Return ONLY a valid JSON object with this exact structure:
+{
+  "plot_and_structural_integrity": {"score": <1-5>, "reasoning": "<your analysis>"},
+  "character_and_dialogue": {"score": <1-5>, "reasoning": "<your analysis>"},
+  ... (continue for all 12 criteria)
+}'''
+
+# Hugging Face Hub configuration (optional)
+[huggingface]
+# Repository ID for uploads (e.g., "username/dataset-name")
+# Can also be specified via --hf-repo-id flag
+repo_id = ""

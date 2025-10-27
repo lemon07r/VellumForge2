@@ -1,0 +1,157 @@
+package orchestrator
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/lamim/vellumforge2/internal/api"
+	"github.com/lamim/vellumforge2/internal/util"
+	"github.com/lamim/vellumforge2/pkg/models"
+	"github.com/schollz/progressbar/v3"
+)
+
+func (o *Orchestrator) worker(
+	ctx context.Context,
+	workerID int,
+	jobs <-chan models.GenerationJob,
+	results chan<- models.GenerationResult,
+	wg *sync.WaitGroup,
+) {
+	defer wg.Done()
+
+	workerLogger := o.logger.With("worker_id", workerID)
+	workerLogger.Debug("Worker started")
+
+	for job := range jobs {
+		select {
+		case <-ctx.Done():
+			workerLogger.Info("Worker cancelled")
+			return
+		default:
+		}
+
+		startTime := time.Now()
+		result := o.processJob(ctx, workerLogger, job)
+		result.Duration = time.Since(startTime)
+
+		results <- result
+	}
+
+	workerLogger.Debug("Worker finished")
+}
+
+func (o *Orchestrator) processJob(
+	ctx context.Context,
+	logger *slog.Logger,
+	job models.GenerationJob,
+) models.GenerationResult {
+	result := models.GenerationResult{
+		Job: job,
+	}
+
+	// Generate chosen response (main model)
+	mainModel := o.cfg.Models["main"]
+	mainAPIKey := o.secrets.GetAPIKey(mainModel.BaseURL)
+
+	// Render chosen generation prompt
+	chosenPrompt, err := util.RenderTemplate(o.cfg.PromptTemplates.ChosenGeneration, map[string]interface{}{
+		"Prompt": job.Prompt,
+	})
+	if err != nil {
+		result.Error = fmt.Errorf("failed to render chosen template: %w", err)
+		return result
+	}
+
+	chosenResp, err := o.apiClient.ChatCompletion(ctx, mainModel, mainAPIKey, []api.Message{
+		{Role: "user", Content: chosenPrompt},
+	})
+	if err != nil {
+		result.Error = fmt.Errorf("failed to generate chosen response: %w", err)
+		return result
+	}
+	result.Chosen = chosenResp.Choices[0].Message.Content
+
+	// Generate rejected response (rejected model)
+	rejectedModel := o.cfg.Models["rejected"]
+	rejectedAPIKey := o.secrets.GetAPIKey(rejectedModel.BaseURL)
+
+	// Render rejected generation prompt
+	rejectedPrompt, err := util.RenderTemplate(o.cfg.PromptTemplates.RejectedGeneration, map[string]interface{}{
+		"Prompt": job.Prompt,
+	})
+	if err != nil {
+		result.Error = fmt.Errorf("failed to render rejected template: %w", err)
+		return result
+	}
+
+	rejectedResp, err := o.apiClient.ChatCompletion(ctx, rejectedModel, rejectedAPIKey, []api.Message{
+		{Role: "user", Content: rejectedPrompt},
+	})
+	if err != nil {
+		result.Error = fmt.Errorf("failed to generate rejected response: %w", err)
+		return result
+	}
+	result.Rejected = rejectedResp.Choices[0].Message.Content
+
+	// Optional: Run judge evaluation
+	if o.judgeModule != nil {
+		judgeResult, err := o.judgeModule.Evaluate(ctx, job.Prompt, result.Chosen, result.Rejected)
+		if err != nil {
+			logger.Warn("Judge evaluation failed",
+				"job_id", job.ID,
+				"error", err)
+			// Don't fail the entire result, just log the error
+		} else {
+			result.JudgeResult = judgeResult
+		}
+	}
+
+	return result
+}
+
+func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	bar := progressbar.Default(int64(o.stats.TotalPrompts), "Processing")
+
+	for result := range results {
+		if result.Error != nil {
+			o.logger.Error("Job failed",
+				"job_id", result.Job.ID,
+				"error", result.Error)
+			o.stats.FailureCount++
+		} else {
+			// Write to dataset
+			record := models.DatasetRecord{
+				MainTopic: result.Job.MainTopic,
+				SubTopic:  result.Job.SubTopic,
+				Prompt:    result.Job.Prompt,
+				Chosen:    result.Chosen,
+				Rejected:  result.Rejected,
+			}
+
+			// Add judge results if available
+			if result.JudgeResult != nil {
+				record.ChosenScores = result.JudgeResult.ChosenScores
+				record.RejectedScores = result.JudgeResult.RejectedScores
+				record.ChosenScoreTotal = result.JudgeResult.ChosenScoreTotal
+				record.RejectedScoreTotal = result.JudgeResult.RejectedScoreTotal
+				record.PreferenceMargin = result.JudgeResult.PreferenceMargin
+			}
+
+			if err := o.dataWriter.WriteRecord(record); err != nil {
+				o.logger.Error("Failed to write record",
+					"job_id", result.Job.ID,
+					"error", err)
+				o.stats.FailureCount++
+			} else {
+				o.stats.SuccessCount++
+			}
+		}
+
+		_ = bar.Add(1)
+	}
+}
