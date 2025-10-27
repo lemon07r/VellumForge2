@@ -16,12 +16,22 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
           cache: true
+
+      - name: Generate Changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: .github/cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
 
       - name: Build all platforms
         run: make build-all
@@ -40,6 +50,11 @@ jobs:
           cp configs/config.example.toml release-assets/
           cp configs/.env.example release-assets/
           
+          # Copy changelog
+          if [ -f CHANGELOG.md ]; then
+            cp CHANGELOG.md release-assets/
+          fi
+          
           # Create checksums
           cd release-assets
           sha256sum * > SHA256SUMS
@@ -48,6 +63,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*
-          generate_release_notes: true
+          body_path: CHANGELOG.md
           draft: false
           prerelease: false
