@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Build all platforms
+        run: make build-all
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          
+          # Copy binaries
+          cp bin/vellumforge2-linux-amd64 release-assets/
+          cp bin/vellumforge2-darwin-amd64 release-assets/
+          cp bin/vellumforge2-darwin-arm64 release-assets/
+          cp bin/vellumforge2-windows-amd64.exe release-assets/
+          
+          # Copy example files
+          cp configs/config.example.toml release-assets/
+          cp configs/.env.example release-assets/
+          
+          # Create checksums
+          cd release-assets
+          sha256sum * > SHA256SUMS
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
