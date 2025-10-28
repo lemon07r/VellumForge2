@@ -18,6 +18,10 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+// overGenerationMultiplier defines the buffer percentage for subtopic generation
+// Requesting 115% of target helps account for LLM undershoot and duplicates
+const overGenerationMultiplier = 1.15
+
 // Orchestrator manages the entire data generation pipeline
 type Orchestrator struct {
 	cfg         *config.Config
@@ -130,7 +134,7 @@ func (o *Orchestrator) generateSubtopics(ctx context.Context) ([]string, error) 
 	targetCount := o.cfg.Generation.NumSubtopics
 
 	// STRATEGY: Request 115% to account for LLM undershoot and duplicates
-	requestCount := int(float64(targetCount) * 1.15)
+	requestCount := int(float64(targetCount) * overGenerationMultiplier)
 
 	o.logger.Info("Generating subtopics with over-generation strategy",
 		"target", targetCount,
@@ -293,7 +297,7 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		// Extract JSON from potential markdown code blocks
 		jsonStr := extractJSON(content)
 
-		o.logger.Debug("Extracted JSON", "length", len(jsonStr), "first_100_chars", truncateString(jsonStr, 100))
+		o.logger.Debug("Extracted JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
 
 		var prompts []string
 		if err := json.Unmarshal([]byte(jsonStr), &prompts); err != nil {
@@ -362,12 +366,4 @@ func (o *Orchestrator) generatePreferencePairs(ctx context.Context, jobs []model
 // GetStats returns the session statistics
 func (o *Orchestrator) GetStats() *models.SessionStats {
 	return o.stats
-}
-
-// truncateString truncates a string to maxLen characters
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }

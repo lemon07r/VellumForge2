@@ -32,7 +32,7 @@ func ValidateJSONArray(jsonStr string) (bool, int, error) {
 // ValidateStringArray validates and unmarshals a JSON array of strings
 // Returns: (strings, actualCount, error)
 func ValidateStringArray(jsonStr string, expectedMin int) ([]string, int, error) {
-	// Pre-validate
+	// Pre-validate structure and syntax
 	valid, _, err := ValidateJSONArray(jsonStr)
 	if !valid {
 		return nil, 0, err
@@ -69,15 +69,15 @@ func deduplicateStrings(items []string) []string {
 	unique := make([]string, 0, len(items))
 
 	for _, item := range items {
-		// Normalize for comparison (trim, lowercase)
-		normalized := strings.TrimSpace(strings.ToLower(item))
+		trimmed := strings.TrimSpace(item)
+		normalized := strings.ToLower(trimmed)
 		if normalized == "" {
 			continue
 		}
 
 		if !seen[normalized] {
 			seen[normalized] = true
-			unique = append(unique, strings.TrimSpace(item)) // Keep original casing
+			unique = append(unique, trimmed) // Keep original casing
 		}
 	}
 

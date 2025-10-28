@@ -21,10 +21,12 @@ func RenderTemplate(tmpl string, data map[string]interface{}) (string, error) {
 	return buf.String(), nil
 }
 
-// TruncateString truncates a string to maxLen characters
+// TruncateString truncates a string to maxLen runes (Unicode-safe)
+// Uses runes instead of bytes to properly handle multi-byte UTF-8 characters
 func TruncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }
