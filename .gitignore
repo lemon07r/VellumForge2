@@ -45,6 +45,7 @@ REPORTS/
 # Config files
 *.toml
 !config.example.toml
+!cliff.toml
 
 # Old .git files
 old.git.backup/
