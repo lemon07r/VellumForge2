@@ -30,6 +30,7 @@
 - Robust JSON extraction with proper bracket matching
 - Auto-fixes truncated JSON responses
 - Case-insensitive deduplication of generated items
+- **Checkpoint/resume** for interrupted sessions with async I/O
 
 ### **Rich Output & Logging**
 - JSONL format compatible with DPO training frameworks
@@ -37,6 +38,7 @@
 - Dual logging - JSON to file (`session.log`) + text to stdout
 - Comprehensive error logging with full response context
 - Generation statistics with failure rate tracking
+- Checkpoint files for session state persistence
 
 ### **Hugging Face Hub Integration**
 - Native NDJSON commit API implementation (no external dependencies)
@@ -439,6 +441,75 @@ VellumForge2 v1.2+ supports graceful shutdown via Ctrl+C:
 - Adjust configuration and restart
 - Respond to resource constraints
 
+### Checkpoint & Resume
+
+VellumForge2 v1.3+ includes robust checkpoint/resume functionality for interrupted sessions:
+
+**Features:**
+- Automatic state persistence during generation
+- Resume from any interruption (Ctrl+C, crash, system failure)
+- Phase-based checkpointing (subtopics, prompts, preference pairs)
+- Async checkpoint writes for minimal performance impact (<1% overhead)
+- Config validation to prevent incompatible resumes
+
+**Enable checkpointing:**
+
+```toml
+[generation]
+enable_checkpointing = true
+checkpoint_interval = 10  # Save every 10 completed jobs
+```
+
+**Resume after interruption:**
+
+```bash
+# Option 1: Edit config
+[generation]
+resume_from_session = "session_2025-10-28T14-30-00"
+
+# Then run normally
+./bin/vellumforge2 run --config config.toml
+
+# Option 2: Use CLI command (auto-updates config)
+./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
+```
+
+**Manage checkpoints:**
+
+```bash
+# List all sessions with checkpoint status
+./bin/vellumforge2 checkpoint list
+
+# Inspect checkpoint details
+./bin/vellumforge2 checkpoint inspect session_2025-10-28T14-30-00
+```
+
+**What's saved:**
+- All completed subtopics
+- All generated prompts
+- Each completed preference pair (job)
+- Cumulative statistics
+- Current phase and progress
+
+**Checkpoint file structure:**
+
+```
+output/
+└── session_2025-10-28T14-30-00/
+    ├── dataset.jsonl       # Incremental results
+    ├── checkpoint.json     # State for resume
+    ├── config.toml.bak     # Config snapshot
+    └── session.log         # Structured logs
+```
+
+**Use cases:**
+- Long-running generations (10K+ rows)
+- Unstable network connections
+- Experimenting with interrupted partial runs
+- Saving API costs by avoiding restarts from scratch
+
+**Performance:** Checkpoint saves are asynchronous with < 1% throughput impact. Phase transitions use synchronous saves for data integrity.
+
 ### Concurrency Tuning
 
 Adjust worker pool size based on your API limits:
@@ -687,11 +758,13 @@ VellumForge2 is currently considered feature complete, with all intended feature
 - [x] **v1.2**: Config validation with upper bounds
 - [x] **v1.2**: Template caching for performance
 - [x] **v1.2**: Precompiled regex patterns
+- [x] **v1.3**: Resume from checkpoint on failure (v1.3)
 
 ### Potential Ideas for Future Improvements
 - [ ] Support for additional DPO schema formats
 - [ ] Batch processing mode for large-scale generation
-- [ ] Resume from checkpoint on failure
+- [ ] Checkpoint compression for large datasets
+- [ ] Cloud storage backends for checkpoints (S3, GCS)
 - [ ] Web UI for monitoring and configuration
 - [ ] Plugin system for custom judges
 - [ ] Multi-model ensemble evaluation
@@ -699,6 +772,7 @@ VellumForge2 is currently considered feature complete, with all intended feature
 
 ---
 
-**Status**: **STABLE** (v1.2.0) - Enhanced with Configurable Over-Generation, Graceful Shutdown, and Performance Optimizations
+**Status**: **BETA** (v1.2.0) - Enhanced with Configurable Over-Generation, Graceful Shutdown, and Performance Optimizations
+**Status**: **EXPERIMENTAL** (v1.3.0) - Enhanced with Checkpoint/Resume, Async I/O, and CLI Management Tools
 
 

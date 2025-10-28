@@ -312,6 +312,77 @@ WARN  Generation cancelled by user (Ctrl+C)
 # Partial dataset saved to output/session_*/dataset.jsonl
 ```
 
+### Problem: "Generation interrupted, want to resume"
+
+**Solution**: VellumForge2 v1.3+ includes checkpoint/resume functionality
+
+**Enable checkpointing:**
+```toml
+[generation]
+enable_checkpointing = true
+checkpoint_interval = 10  # Save every 10 completed jobs
+```
+
+**Resume after interruption:**
+
+**Option 1: Edit config and run normally**
+```toml
+[generation]
+resume_from_session = "session_2025-10-28T14-30-00"
+```
+```bash
+./bin/vellumforge2 run --config config.toml
+```
+
+**Option 2: Use CLI command (automatically resumes)**
+```bash
+./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
+```
+
+**Manage checkpoints:**
+```bash
+# List all sessions with checkpoint status
+./bin/vellumforge2 checkpoint list
+
+# Inspect checkpoint details (shows progress %)
+./bin/vellumforge2 checkpoint inspect session_2025-10-28T14-30-00
+```
+
+**What gets saved:**
+- All completed subtopics
+- All generated prompts
+- Each completed preference pair
+- Progress statistics
+- Current phase
+
+**Example workflow:**
+```bash
+# 1. Start generation with checkpointing
+$ ./bin/vellumforge2 run --config config.toml
+# ... 60% complete ...
+^C  # Interrupted!
+
+# 2. List sessions to find your checkpoint
+$ ./bin/vellumforge2 checkpoint list
+SESSION                             CHECKPOINT   PHASE        PROGRESS
+--------------------------------------------------------------------------------
+session_2025-10-28T14-30-00         Yes          pairs        60.5%
+
+# 3. Resume from checkpoint
+$ ./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
+INFO  Resuming from checkpoint: preference pairs phase
+      total=500 completed=302 pending=198 progress=60.4%
+# ... continues from 60% ...
+```
+
+**Use cases:**
+- Long-running generations (10K+ rows)
+- Unstable connections
+- Saving API costs by avoiding restarts
+- Experimenting with partial runs
+
+**Performance:** < 1% overhead, async I/O
+
 ### Problem: "Config validation errors"
 
 **Example**: "generation.concurrency must not exceed 1024"
@@ -385,6 +456,64 @@ num_subtopics = 5000
 over_generation_buffer = 0.25  # Request 25% extra
 max_exclusion_list_size = 100  # Larger exclusion list for retries
 ```
+
+## New in v1.3.0
+
+VellumForge2 v1.3.0 brings robust checkpoint/resume functionality:
+
+### Checkpoint & Resume
+
+**What it is**: Automatic state persistence during generation, allowing you to resume from any interruption.
+
+**Why it matters**: Long-running generations (10K+ rows) can be interrupted by network issues, system failures, or Ctrl+C. Resume from exactly where you left off without losing progress.
+
+**How to use:**
+
+1. **Enable in config:**
+```toml
+[generation]
+enable_checkpointing = true
+checkpoint_interval = 10  # Save every 10 jobs (default)
+```
+
+2. **Run normally:**
+```bash
+./bin/vellumforge2 run --config config.toml
+# ... generation running ...
+^C  # Interrupt with Ctrl+C
+```
+
+3. **Resume:**
+```bash
+# Option 1: Edit config
+[generation]
+resume_from_session = "session_2025-10-28T14-30-00"
+./bin/vellumforge2 run --config config.toml
+
+# Option 2: Use CLI
+./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
+```
+
+**CLI Commands:**
+```bash
+# List all sessions with checkpoint status
+./bin/vellumforge2 checkpoint list
+
+# Inspect checkpoint (shows detailed progress)
+./bin/vellumforge2 checkpoint inspect session_2025-10-28T14-30-00
+
+# Resume from checkpoint (auto-updates config)
+./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
+```
+
+**Features:**
+- Phase-based checkpointing (subtopics, prompts, pairs)
+- Async I/O for < 1% performance impact
+- Config validation (prevents incompatible resumes)
+- Works with graceful shutdown (Ctrl+C)
+- Atomic writes (no corruption)
+
+---
 
 ## New in v1.2.0 
 

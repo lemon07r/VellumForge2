@@ -33,6 +33,7 @@ type Manager struct {
 	stopWriter  chan struct{}
 	writerError error
 	errorMu     sync.Mutex
+	writeMu     sync.Mutex // Protects concurrent disk writes
 }
 
 // NewManager creates a new checkpoint manager
@@ -109,6 +110,10 @@ func (m *Manager) startAsyncWriter() {
 
 // writeCheckpointToDisk performs the actual disk write (called by async writer)
 func (m *Manager) writeCheckpointToDisk(cp *models.Checkpoint) error {
+	// Protect against concurrent disk writes
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+
 	// Marshal to JSON
 	data, err := json.MarshalIndent(cp, "", "  ")
 	if err != nil {
