@@ -17,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          go-version: '1.25.x'
           cache: true
 
       - name: Run golangci-lint
@@ -29,9 +29,6 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     needs: lint
-    strategy:
-      matrix:
-        go-version: ['1.21.x', '1.22.x', '1.23.x']
     
     steps:
       - name: Checkout code
@@ -40,7 +37,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: '1.25.x'
           cache: true
 
       - name: Download dependencies
@@ -50,7 +47,6 @@ jobs:
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage
-        if: matrix.go-version == '1.21.x'
         uses: codecov/codecov-action@v4
         continue-on-error: true
         with:
@@ -69,7 +65,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          go-version: '1.25.x'
           cache: true
 
       - name: Build binary

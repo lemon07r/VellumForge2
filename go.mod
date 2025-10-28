@@ -1,6 +1,6 @@
 module github.com/lamim/vellumforge2
 
-go 1.21
+go 1.25
 
 require (
 	github.com/pelletier/go-toml/v2 v2.1.1

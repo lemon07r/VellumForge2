@@ -45,9 +45,9 @@
 
 ## Installation
 
-### From Binary
+### Prebuilt Binary
 
-Compiling from source (see below) is preferred, but sometimes binaries will be available to download from the releases page. Make sure to download an example config too to help get started.
+Compiling from source (see below) is preferred, but binaries are available to download in releases. These binaries are built automatically by github workflows, triggered by new release tags. It's a good idea to also download the example configs to help get started.
 
 ### From Source (Recommended)
 
