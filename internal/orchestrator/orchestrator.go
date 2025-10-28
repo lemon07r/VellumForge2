@@ -354,6 +354,10 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 	jsonStr := extractJSON(content)
 	o.logger.Debug("Extracted JSON", "length", len(jsonStr))
 
+	// Repair common JSON issues from LLM responses
+	jsonStr = util.RepairJSON(jsonStr)
+	o.logger.Debug("Repaired JSON", "length", len(jsonStr))
+
 	// PRE-VALIDATE before unmarshaling
 	valid, elemCount, err := ValidateJSONArray(jsonStr)
 	if !valid {
@@ -417,6 +421,10 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		jsonStr := extractJSON(content)
 
 		o.logger.Debug("Extracted JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
+
+		// Repair common JSON issues from LLM responses
+		jsonStr = util.RepairJSON(jsonStr)
+		o.logger.Debug("Repaired JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
 
 		// PRE-VALIDATE before unmarshaling (same pattern as requestSubtopics)
 		valid, elemCount, err := ValidateJSONArray(jsonStr)

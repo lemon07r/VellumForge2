@@ -139,3 +139,97 @@ func SanitizeJSON(s string) string {
 
 	return result.String()
 }
+
+// RepairJSON attempts to fix common JSON issues from LLM responses
+// Handles: trailing commas, missing commas, truncated arrays, empty elements
+func RepairJSON(s string) string {
+	// First extract JSON to handle truncation
+	s = ExtractJSON(s)
+
+	// Then sanitize newlines and escape characters
+	s = SanitizeJSON(s)
+
+	var result strings.Builder
+	inString := false
+	escaped := false
+	lastNonWhitespace := byte(0)
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+
+		// Track escape sequences
+		if escaped {
+			result.WriteByte(ch)
+			escaped = false
+			lastNonWhitespace = ch
+			continue
+		}
+
+		if ch == '\\' {
+			result.WriteByte(ch)
+			escaped = true
+			continue
+		}
+
+		// Track string boundaries
+		if ch == '"' {
+			// Fix missing comma before string: check if we need a comma
+			if !inString && (lastNonWhitespace == '"' || lastNonWhitespace == '}' || lastNonWhitespace == ']') {
+				result.WriteByte(',')
+			}
+			inString = !inString
+			result.WriteByte(ch)
+			lastNonWhitespace = ch
+			continue
+		}
+
+		// Only fix issues outside of strings
+		if !inString {
+			// Fix trailing commas: ,] or ,}
+			if ch == ']' || ch == '}' {
+				// Remove trailing comma if present
+				if lastNonWhitespace == ',' {
+					// Remove the comma by reconstructing without it
+					resultStr := result.String()
+					if len(resultStr) > 0 {
+						// Find and remove the last comma
+						for j := len(resultStr) - 1; j >= 0; j-- {
+							if resultStr[j] == ',' {
+								result.Reset()
+								result.WriteString(resultStr[:j])
+								result.WriteString(resultStr[j+1:])
+								break
+							}
+						}
+					}
+				}
+				result.WriteByte(ch)
+				lastNonWhitespace = ch
+				continue
+			}
+
+			// Fix consecutive commas: ,, -> ,
+			if ch == ',' && lastNonWhitespace == ',' {
+				// Skip this comma
+				continue
+			}
+
+			// Fix missing comma before object or array: "}[" or "}{"
+			if (ch == '[' || ch == '{') && (lastNonWhitespace == '}' || lastNonWhitespace == ']' || lastNonWhitespace == '"') {
+				result.WriteByte(',')
+				result.WriteByte(ch)
+				lastNonWhitespace = ch
+				continue
+			}
+
+			// Track non-whitespace characters
+			if ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' {
+				lastNonWhitespace = ch
+			}
+		}
+
+		result.WriteByte(ch)
+	}
+
+	return result.String()
+}
