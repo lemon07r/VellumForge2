@@ -18,10 +18,6 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-// overGenerationMultiplier defines the buffer percentage for subtopic generation
-// Requesting 115% of target helps account for LLM undershoot and duplicates
-const overGenerationMultiplier = 1.15
-
 // Orchestrator manages the entire data generation pipeline
 type Orchestrator struct {
 	cfg         *config.Config
@@ -133,13 +129,15 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 func (o *Orchestrator) generateSubtopics(ctx context.Context) ([]string, error) {
 	targetCount := o.cfg.Generation.NumSubtopics
 
-	// STRATEGY: Request 115% to account for LLM undershoot and duplicates
-	requestCount := int(float64(targetCount) * overGenerationMultiplier)
+	// STRATEGY: Request extra based on configurable buffer to account for LLM undershoot and duplicates
+	multiplier := 1.0 + o.cfg.Generation.OverGenerationBuffer
+	requestCount := int(float64(targetCount) * multiplier)
 
+	bufferPercent := int(o.cfg.Generation.OverGenerationBuffer * 100)
 	o.logger.Info("Generating subtopics with over-generation strategy",
 		"target", targetCount,
 		"requesting", requestCount,
-		"buffer_percent", 15)
+		"buffer_percent", bufferPercent)
 
 	// First attempt: Request slightly more than needed
 	subtopics, err := o.requestSubtopics(ctx, requestCount, nil)
@@ -194,6 +192,17 @@ func (o *Orchestrator) generateSubtopics(ctx context.Context) ([]string, error) 
 	return finalUnique, nil
 }
 
+// truncateExclusionList limits the exclusion list to avoid prompt overflow
+// Uses last N items as most recent failures are more relevant
+// Returns the truncated list and a boolean indicating if truncation occurred
+func truncateExclusionList(items []string, maxSize int) ([]string, bool) {
+	if len(items) <= maxSize {
+		return items, false
+	}
+	// Return last maxSize items (most recent)
+	return items[len(items)-maxSize:], true
+}
+
 // requestSubtopics makes a single API call for subtopics
 // exclusionList is optional (nil on first call, populated on retry)
 func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusionList []string) ([]string, error) {
@@ -205,8 +214,21 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 
 	// Add exclusion list if present (for retry)
 	if len(exclusionList) > 0 {
+		// Truncate if necessary to prevent prompt overflow
+		truncated, wasTruncated := truncateExclusionList(
+			exclusionList,
+			o.cfg.Generation.MaxExclusionListSize,
+		)
+
+		if wasTruncated {
+			o.logger.Warn("Exclusion list truncated to prevent prompt overflow",
+				"original_size", len(exclusionList),
+				"truncated_size", len(truncated),
+				"max_size", o.cfg.Generation.MaxExclusionListSize)
+		}
+
 		// Format as simple comma-separated list to keep LLM focused
-		excluded := strings.Join(exclusionList, ", ")
+		excluded := strings.Join(truncated, ", ")
 		templateData["ExcludeSubtopics"] = excluded
 		templateData["IsRetry"] = true
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/lamim/vellumforge2/internal/api"
 	"github.com/lamim/vellumforge2/internal/config"
@@ -138,9 +140,15 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	// Create orchestrator
 	orch := orchestrator.New(cfg, secrets, apiClient, dataWriter, logger)
 
-	// Run generation pipeline
-	ctx := context.Background()
+	// Run generation pipeline with signal-aware context for graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	if err := orch.Run(ctx); err != nil {
+		if err == context.Canceled {
+			logger.Warn("Generation cancelled by user (Ctrl+C)")
+			return fmt.Errorf("generation cancelled")
+		}
 		return fmt.Errorf("generation failed: %w", err)
 	}
 

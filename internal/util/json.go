@@ -5,13 +5,17 @@ import (
 	"strings"
 )
 
+// Precompiled regex patterns for performance (compiled once at package init)
+var (
+	jsonCodeBlockRegex = regexp.MustCompile("```(?:json)?\\s*([\\s\\S]*?)```")
+)
+
 // ExtractJSON extracts JSON content from a response that may contain markdown code blocks
 // and attempts to fix truncated JSON arrays and objects
 // Handles both arrays [] and objects {}
 func ExtractJSON(s string) string {
-	// Try to extract from markdown code blocks
-	re := regexp.MustCompile("```(?:json)?\\s*([\\s\\S]*?)```")
-	matches := re.FindStringSubmatch(s)
+	// Try to extract from markdown code blocks using precompiled regex
+	matches := jsonCodeBlockRegex.FindStringSubmatch(s)
 	if len(matches) > 1 {
 		s = strings.TrimSpace(matches[1])
 	} else {

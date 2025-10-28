@@ -145,7 +145,10 @@ These are all generated using Kimi-K2-0905 from Nvidia NIM API for topics, promp
 main_topic = "Fantasy Fiction"
 num_subtopics = 64
 num_prompts_per_subtopic = 2
-concurrency = 8  # Number of parallel workers
+concurrency = 8  # Number of parallel workers (max: 1024)
+over_generation_buffer = 0.15  # Request 15% extra to hit target counts
+max_exclusion_list_size = 50  # Limit retry prompt size
+# disable_validation_limits = false  # Set true to exceed default limits
 
 [models.main]
 base_url = "https://integrate.api.nvidia.com/v1"
@@ -351,7 +354,90 @@ concurrency = 8  # 8 parallel workers
 
 **Rate Limit Math**: With 8 workers at 40 req/min, you're making ~5 req/min per worker on average.
 
-**Smart Retry Logic**: VellumForge2 automatically applies longer exponential backoff for rate limit errors (6s → 18s → 54s).
+**Smart Retry Logic**: VellumForge2 automatically applies longer exponential backoff for rate limit errors (6s → 18s → 54s), capped at 2 minutes by default.
+
+## Configuration Best Practices
+
+### Over-Generation Strategy
+
+VellumForge2 uses an intelligent over-generation strategy to reliably hit target counts:
+
+```toml
+[generation]
+over_generation_buffer = 0.15  # Request 15% extra (configurable: 0.0-1.0)
+max_exclusion_list_size = 50   # Limit retry prompt size
+```
+
+**How it works:**
+1. Request `target × (1 + buffer)` items initially (e.g., 115 for target=100)
+2. Deduplicate results (case-insensitive)
+3. If short, retry once for the difference with exclusion list
+4. Achieves 95%+ accuracy vs 79% with single-shot
+
+**Tuning tips:**
+- Higher buffer (0.25-0.50) for models that frequently undershoot
+- Lower buffer (0.05-0.10) for reliable models to save API calls
+- Set to 0.0 to disable (not recommended)
+
+### Rate Limiting and Backoff
+
+VellumForge2 automatically handles rate limits with intelligent backoff:
+
+- **Standard retries**: 2^n exponential backoff (2s, 4s, 8s...)
+- **Rate limit retries**: 3^n exponential backoff (6s, 18s, 54s...)
+- **Automatic cap**: Maximum 2 minutes per retry (configurable)
+
+```toml
+[models.main]
+rate_limit_per_minute = 40
+max_backoff_seconds = 120  # Optional: override default 2-minute cap
+```
+
+**Tuning tips:**
+- Reduce `max_backoff_seconds` for faster failure detection
+- Increase for heavily rate-limited APIs (up to 300s / 5 minutes)
+- Judge models may need longer caps due to complex responses
+
+### Safe Configuration Limits
+
+VellumForge2 enforces safety limits to prevent resource exhaustion:
+
+| Config Field | Min | Max | Recommended |
+|--------------|-----|-----|-------------|
+| `concurrency` | 1 | 1024* | 4-16 |
+| `num_subtopics` | 1 | 10,000* | 10-500 |
+| `num_prompts_per_subtopic` | 1 | 10,000* | 2-10 |
+| `over_generation_buffer` | 0.0 | 1.0 | 0.15 |
+| `max_output_tokens` | 1 | `context_size` | Model-specific |
+
+\* _Limits can be disabled by setting `disable_validation_limits = true` (use with caution)_
+
+**Validation**: The config validator checks these limits and provides clear error messages.
+
+**Disabling Limits**: For extreme use cases, you can disable upper bound validation:
+
+```toml
+[generation]
+disable_validation_limits = true  # USE WITH CAUTION
+concurrency = 2048  # Now allowed
+num_subtopics = 50000  # Now allowed
+```
+
+⚠️ **Warning**: Disabling limits may cause memory exhaustion or API rate limit issues. Only use when you have sufficient resources and understand the implications.
+
+### Graceful Shutdown
+
+VellumForge2 v1.2+ supports graceful shutdown via Ctrl+C:
+
+- Press **Ctrl+C** once to initiate graceful shutdown
+- Current batch completes, then stops cleanly
+- Partial dataset is saved to session directory
+- Logs show "Generation cancelled by user"
+
+**Use cases:**
+- Stop long-running generations early
+- Adjust configuration and restart
+- Respond to resource constraints
 
 ### Concurrency Tuning
 
@@ -594,6 +680,13 @@ VellumForge2 is currently considered feature complete, with all intended feature
 - [x] Generation count validation
 - [x] Dual logging system (JSON + text)
 - [x] Story generation templates
+- [x] **v1.2**: Configurable over-generation buffer
+- [x] **v1.2**: Exclusion list size limits
+- [x] **v1.2**: Backoff cap for rate limits
+- [x] **v1.2**: Graceful shutdown (Ctrl+C)
+- [x] **v1.2**: Config validation with upper bounds
+- [x] **v1.2**: Template caching for performance
+- [x] **v1.2**: Precompiled regex patterns
 
 ### Potential Ideas for Future Improvements
 - [ ] Support for additional DPO schema formats
@@ -606,6 +699,6 @@ VellumForge2 is currently considered feature complete, with all intended feature
 
 ---
 
-**Status**: **STABLE** (v1.1.0) - Now with Smart Over-Generation (95%+ count accuracy)
+**Status**: **STABLE** (v1.2.0) - Enhanced with Configurable Over-Generation, Graceful Shutdown, and Performance Optimizations
 
 

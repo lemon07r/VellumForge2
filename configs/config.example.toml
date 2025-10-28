@@ -6,14 +6,40 @@
 main_topic = "Fantasy Fiction"
 
 # Number of subtopics to generate from the main topic
+# Range: 1-10000 (can be increased with disable_validation_limits)
 num_subtopics = 8
 
 # Number of prompts to generate per subtopic
+# Range: 1-10000 (can be increased with disable_validation_limits)
 num_prompts_per_subtopic = 4
 
 # Number of concurrent workers for generating preference pairs
 # Recommended: 4-16 depending on API rate limits
+# Range: 1-1024 (can be increased with disable_validation_limits)
 concurrency = 8
+
+# Over-generation buffer for subtopic/prompt generation (0.0-1.0)
+# Default: 0.15 (15% extra requested, then deduplicated and trimmed)
+# This helps achieve target counts despite LLM undershoot and duplicates
+# Set to 0.0 to disable over-generation (not recommended)
+# Example: With buffer=0.15 and num_subtopics=100, requests 115 subtopics
+over_generation_buffer = 0.15
+
+# Maximum exclusion list size for retry prompts
+# Default: 50
+# Limits the number of excluded items passed to LLM in retry attempts
+# to prevent context overflow. Uses most recent failures.
+# Increase for models with larger context windows if needed.
+max_exclusion_list_size = 50
+
+# Disable validation limits (USE WITH CAUTION)
+# Default: false
+# When set to true, disables upper bound validation for concurrency,
+# num_subtopics, and num_prompts_per_subtopic. This allows you to exceed
+# the default safety limits (1024, 10000, 10000 respectively).
+# WARNING: Very high values may cause memory exhaustion or API rate limits.
+# Only enable this if you know what you're doing and have sufficient resources.
+# disable_validation_limits = false
 
 # Main model configuration (generates "chosen" responses)
 [models.main]
@@ -27,6 +53,12 @@ max_output_tokens = 16384
 context_size = 16384
 rate_limit_per_minute = 20
 
+# Optional: Maximum backoff duration in seconds for rate limit retries
+# Default: 120 (2 minutes)
+# Prevents indefinite waits in pathological rate limit scenarios
+# The backoff for rate limits uses 3^n (6s, 18s, 54s, ...) up to this cap
+# max_backoff_seconds = 120
+
 # Rejected model configuration (generates "rejected" responses)
 # Strategy: Use a weaker model, higher temperature, or non-instruct model
 [models.rejected]
@@ -39,6 +71,7 @@ min_p = 0.0
 max_output_tokens = 16384
 context_size = 16384
 rate_limit_per_minute = 20
+# max_backoff_seconds = 120  # Optional: override default backoff cap
 
 # Judge model configuration (optional LLM-as-a-Judge evaluation)
 [models.judge]
@@ -52,6 +85,7 @@ min_p = 0.0
 max_output_tokens = 16384
 context_size = 262144
 rate_limit_per_minute = 20
+# max_backoff_seconds = 180  # Optional: judges may need longer retries (3 minutes)
 
 # Prompt templates (customize for your domain)
 # Available template variables per template:

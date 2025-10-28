@@ -23,6 +23,8 @@ const (
 	DefaultBaseRetryDelay = 2 * time.Second
 	// RateLimitBackoffMultiplier is the multiplier for rate limit backoff (3^n)
 	RateLimitBackoffMultiplier = 3
+	// DefaultMaxBackoffDuration is the default maximum backoff duration
+	DefaultMaxBackoffDuration = 2 * time.Minute
 )
 
 // Client handles HTTP requests to OpenAI-compatible API endpoints
@@ -82,6 +84,15 @@ func (c *Client) ChatCompletion(
 			// For rate limit errors, use longer delays (3^n: 6s, 18s, 54s)
 			if apiErr, ok := lastErr.(*APIError); ok && apiErr.StatusCode == http.StatusTooManyRequests {
 				backoff = time.Duration(math.Pow(RateLimitBackoffMultiplier, float64(attempt))) * c.baseRetryDelay
+			}
+
+			// Apply configurable backoff cap
+			maxBackoff := DefaultMaxBackoffDuration
+			if modelCfg.MaxBackoffSeconds > 0 {
+				maxBackoff = time.Duration(modelCfg.MaxBackoffSeconds) * time.Second
+			}
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 
 			jitter := time.Duration(float64(backoff) * 0.1 * (2*float64(time.Now().UnixNano()%100)/100 - 1))

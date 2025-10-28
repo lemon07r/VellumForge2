@@ -44,6 +44,12 @@ func applyDefaults(cfg *Config) {
 	if cfg.Generation.Concurrency == 0 {
 		cfg.Generation.Concurrency = 8
 	}
+	if cfg.Generation.OverGenerationBuffer == 0 {
+		cfg.Generation.OverGenerationBuffer = 0.15 // 15% buffer by default
+	}
+	if cfg.Generation.MaxExclusionListSize == 0 {
+		cfg.Generation.MaxExclusionListSize = 50
+	}
 
 	// Apply defaults for each model
 	for name, model := range cfg.Models {
@@ -67,6 +73,9 @@ func applyDefaults(cfg *Config) {
 		}
 		if model.RateLimitPerMinute == 0 {
 			model.RateLimitPerMinute = 60
+		}
+		if model.MaxBackoffSeconds == 0 {
+			model.MaxBackoffSeconds = 120 // 2 minutes default
 		}
 		cfg.Models[name] = model
 	}
