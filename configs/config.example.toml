@@ -6,10 +6,10 @@
 main_topic = "Fantasy Fiction"
 
 # Number of subtopics to generate from the main topic
-num_subtopics = 4
+num_subtopics = 8
 
 # Number of prompts to generate per subtopic
-num_prompts_per_subtopic = 8
+num_prompts_per_subtopic = 4
 
 # Number of concurrent workers for generating preference pairs
 # Recommended: 4-16 depending on API rate limits
@@ -25,7 +25,7 @@ top_k = -1  # -1 disables top_k
 min_p = 0.0  # 0.0 disables min_p
 max_output_tokens = 16384
 context_size = 16384
-rate_limit_per_minute = 40
+rate_limit_per_minute = 20
 
 # Rejected model configuration (generates "rejected" responses)
 # Strategy: Use a weaker model, higher temperature, or non-instruct model
@@ -38,7 +38,7 @@ top_k = -1
 min_p = 0.0
 max_output_tokens = 16384
 context_size = 16384
-rate_limit_per_minute = 40
+rate_limit_per_minute = 20
 
 # Judge model configuration (optional LLM-as-a-Judge evaluation)
 [models.judge]
@@ -50,8 +50,8 @@ top_p = 1.0
 top_k = -1
 min_p = 0.0
 max_output_tokens = 16384
-context_size = 16384
-rate_limit_per_minute = 30
+context_size = 262144
+rate_limit_per_minute = 20
 
 # Prompt templates (customize for your domain)
 [prompt_templates]
@@ -78,6 +78,26 @@ Each prompt should:
 
 Return ONLY a valid JSON array of strings (no markdown, no additional text):
 ["Prompt 1", "Prompt 2", ...]'''
+
+chosen_generation = '''You are a talented fantasy fiction writer. Write a compelling short story (400-600 words) based on the following prompt:
+
+{{.Prompt}}
+
+Your story should:
+- Have a clear beginning, middle, and end
+- Feature vivid descriptions and engaging characters
+- Include dialogue where appropriate
+- Show strong narrative voice and style
+- Be polished and publication-ready
+- Occasionally contain some sensitive, mature or NSFW themes
+
+Write the story now:'''
+
+rejected_generation = '''Write a fantasy story based on this prompt:
+
+{{.Prompt}}
+
+Write 300-400 words.'''
 
 judge_rubric = '''You are an expert literary editor and judge for a prestigious fantasy fiction award. Your task is to evaluate the following story based on a detailed 12-point rubric.
 

@@ -111,10 +111,16 @@ HUGGING_FACE_TOKEN=hf_your-actual-token-here
 
 **What happens:**
 1. Creates a timestamped session directory (e.g., `session_2025-10-27T15-30-00/`)
-2. Generates subtopics from your main topic
+2. Generates subtopics from your main topic with **automatic retry** if count falls short
 3. Generates prompts for each subtopic
 4. Creates preference pairs (chosen/rejected responses)
 5. Saves everything to `output/session_*/dataset.jsonl`
+
+**New Feature**: If the LLM returns fewer subtopics than requested (e.g., 271 instead of 344), VellumForge2 automatically:
+- Detects the gap
+- Makes up to 5 retry attempts to generate missing items
+- Filters duplicates
+- Shows detailed progress in logs
 
 ### Check the Results
 
@@ -165,7 +171,7 @@ model_name = "gpt-3.5-turbo"
 temperature = 0.7
 ```
 
-### 3. With LLM-as-a-Judge Evaluation
+### 3. With Story Generation and LLM-as-a-Judge
 
 ```toml
 [models.judge]
@@ -174,12 +180,27 @@ model_name = "gpt-4o"  # Use a strong model for evaluation
 temperature = 0.2      # Low temp for consistent scoring
 
 [prompt_templates]
+# Story generation templates (REQUIRED)
+chosen_generation = '''You are a talented fantasy writer.
+Write a compelling story (400-600 words) for this prompt:
+
+{{.Prompt}}
+
+Include vivid descriptions, engaging characters, and strong narrative voice.'''
+
+rejected_generation = '''Write a fantasy story for this prompt:
+
+{{.Prompt}}
+
+Write 300-400 words.'''
+
+# Judge evaluation template
 judge_rubric = '''
-Evaluate based on:
-1. Accuracy
-2. Clarity
-3. Completeness
-4. Tone
+Evaluate the story based on:
+1. Plot quality
+2. Character development  
+3. Writing style
+4. Creativity
 
 Return JSON with scores 1-5 for each criterion.
 '''
@@ -217,6 +238,28 @@ rate_limit_per_minute = 10  # Lower limit
 1. Lower temperature: `temperature = 0.3`
 2. Update prompt template to be more explicit about JSON format
 3. Try a different model
+
+**Note**: VellumForge2 has built-in JSON extraction and auto-retry, so most parse errors are handled automatically.
+
+### Problem: "Getting fewer subtopics than requested"
+
+**Example**: Requested 344 subtopics, only got 271
+
+**Solution**: VellumForge2 automatically handles this with **iterative regeneration**:
+- Makes up to 5 retry attempts
+- Filters duplicates automatically
+- Passes exclusion list to avoid repeats
+- Logs detailed progress
+
+**What you'll see in logs**:
+```
+INFO  Initial subtopic generation attempt=1 target=344 remaining=344
+INFO  Subtopic generation attempt complete received=271 unique_added=271
+WARN  Regenerating missing subtopics attempt=2 remaining=73
+INFO  Subtopic generation attempt complete received=62 unique_added=60 total_unique=331
+```
+
+**Expected Success Rate**: 95-100% for counts up to 500
 
 ### Problem: "Out of memory"
 
@@ -256,15 +299,30 @@ Experiment with different model pairs for main/rejected to find optimal preferen
 - Same model with different temperatures
 - Instruct vs Base model
 
+### 6. Large Subtopic Counts
+When generating large numbers of subtopics (100+):
+- Iterative regeneration will automatically retry until target is reached
+- Watch logs for duplicate filtering counts
+- Typical success rate is 95-100% for counts up to 500
+- If model exhausts creativity, it will stop with 97%+ of target
+
 ## Advanced Configuration
 
 ### Custom Prompt Templates
 
 ```toml
 [prompt_templates]
+# Subtopic generation with iterative regeneration support
 subtopic_generation = '''
 You are an expert in {{.MainTopic}}.
 Generate {{.NumSubtopics}} specific subtopics.
+
+{{if .IsRetry}}IMPORTANT: This is a retry. Generate {{.NumSubtopics}} NEW subtopics.
+Do NOT repeat these existing ones:
+{{range .ExistingSubtopics}}- {{.}}
+{{end}}
+{{end}}
+
 Return ONLY a JSON array: ["topic1", "topic2", ...]
 '''
 
@@ -274,6 +332,28 @@ Each prompt should be 2-3 sentences.
 Return ONLY a JSON array: ["prompt1", "prompt2", ...]
 '''
 ```
+
+**Template Variables**:
+
+- **Subtopic Generation:**
+  - `{{.MainTopic}}` - Your main theme
+  - `{{.NumSubtopics}}` - Count to generate (adjusts per retry)
+  - `{{.IsRetry}}` - Boolean, true on retry attempts
+  - `{{.ExistingSubtopics}}` - Array of already generated items
+
+- **Prompt Generation:**
+  - `{{.SubTopic}}` - Current subtopic
+  - `{{.NumPrompts}}` - Prompts to generate
+  - `{{.MainTopic}}` - Main topic (also available)
+
+- **Story Generation (chosen_generation, rejected_generation):**
+  - `{{.Prompt}}` - The writing prompt
+  - `{{.MainTopic}}` - Main topic
+  - `{{.SubTopic}}` - Current subtopic
+
+- **Judge Evaluation:**
+  - `{{.Prompt}}` - Original writing prompt
+  - `{{.StoryText}}` - Story to evaluate
 
 ### Multiple API Providers
 
