@@ -54,9 +54,17 @@ context_size = 262144
 rate_limit_per_minute = 20
 
 # Prompt templates (customize for your domain)
+# Available template variables per template:
+#   subtopic_generation: {{.MainTopic}}, {{.NumSubtopics}}, {{.IsRetry}}, {{.ExcludeSubtopics}}
+#   prompt_generation: {{.SubTopic}}, {{.NumPrompts}}, {{.MainTopic}}
+#   chosen_generation: {{.Prompt}}, {{.MainTopic}}, {{.SubTopic}}
+#   rejected_generation: {{.Prompt}}, {{.MainTopic}}, {{.SubTopic}}
+#   judge_rubric: {{.Prompt}}, {{.StoryText}}
 [prompt_templates]
 subtopic_generation = '''You are a creative writing expert specializing in fantasy fiction. Your task is to generate {{.NumSubtopics}} distinct and imaginative subtopics for the main theme: "{{.MainTopic}}".
 
+{{if .IsRetry}}NOTE: Avoid these already generated: {{.ExcludeSubtopics}}
+{{end}}
 Each subtopic should be:
 - Specific and focused enough to inspire detailed story prompts
 - Unique from the others in the list
