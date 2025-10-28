@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+const (
+	// DefaultUploadTimeout is the default timeout for upload operations
+	DefaultUploadTimeout = 120 * time.Second
+	// LogPreviewLength is the maximum length for log previews
+	LogPreviewLength = 500
+)
+
 // Uploader handles uploading datasets to Hugging Face Hub
 type Uploader struct {
 	token      string
@@ -25,7 +32,7 @@ func NewUploader(token string, logger *slog.Logger) *Uploader {
 	return &Uploader{
 		token: token,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // 120 seconds timeout
+			Timeout: DefaultUploadTimeout,
 		},
 		logger: logger.With("component", "hf_uploader"),
 	}
@@ -175,7 +182,11 @@ func (u *Uploader) createRepo(repoID string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -250,8 +261,8 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 	ndjsonPayload := strings.Join(ndjsonLines, "\n")
 
 	// Log preview
-	if len(ndjsonPayload) > 500 {
-		u.logger.Debug("Commit payload (NDJSON)", "preview", ndjsonPayload[:500]+"...")
+	if len(ndjsonPayload) > LogPreviewLength {
+		u.logger.Debug("Commit payload (NDJSON)", "preview", ndjsonPayload[:LogPreviewLength]+"...")
 	} else {
 		u.logger.Debug("Commit payload (NDJSON)", "preview", ndjsonPayload)
 	}
@@ -270,7 +281,11 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	// Read and log response
 	bodyBytes, _ := io.ReadAll(resp.Body)

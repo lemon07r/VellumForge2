@@ -61,7 +61,11 @@ func (u *Uploader) PreuploadLFS(repoID, branch string, files []LFSPointer) (map[
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -95,7 +99,11 @@ func (u *Uploader) UploadLFSFile(uploadInfo *LFSUploadInfo, filePath string) err
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			u.logger.Warn("Failed to close file", "file", filePath, "error", err)
+		}
+	}()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
@@ -121,7 +129,11 @@ func (u *Uploader) UploadLFSFile(uploadInfo *LFSUploadInfo, filePath string) err
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)

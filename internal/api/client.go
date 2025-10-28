@@ -14,6 +14,17 @@ import (
 	"github.com/lamim/vellumforge2/internal/config"
 )
 
+const (
+	// DefaultHTTPTimeout is the default timeout for HTTP requests
+	DefaultHTTPTimeout = 120 * time.Second
+	// DefaultMaxRetries is the default maximum number of retry attempts
+	DefaultMaxRetries = 3
+	// DefaultBaseRetryDelay is the base delay for exponential backoff
+	DefaultBaseRetryDelay = 2 * time.Second
+	// RateLimitBackoffMultiplier is the multiplier for rate limit backoff (3^n)
+	RateLimitBackoffMultiplier = 3
+)
+
 // Client handles HTTP requests to OpenAI-compatible API endpoints
 type Client struct {
 	httpClient      *http.Client
@@ -27,12 +38,12 @@ type Client struct {
 func NewClient(logger *slog.Logger) *Client {
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: DefaultHTTPTimeout,
 		},
 		rateLimiterPool: NewRateLimiterPool(),
 		logger:          logger,
-		maxRetries:      3,
-		baseRetryDelay:  2 * time.Second,
+		maxRetries:      DefaultMaxRetries,
+		baseRetryDelay:  DefaultBaseRetryDelay,
 	}
 }
 
@@ -68,9 +79,9 @@ func (c *Client) ChatCompletion(
 			// Calculate backoff with jitter
 			backoff := time.Duration(math.Pow(2, float64(attempt-1))) * c.baseRetryDelay
 
-			// For rate limit errors, use longer delays
+			// For rate limit errors, use longer delays (3^n: 6s, 18s, 54s)
 			if apiErr, ok := lastErr.(*APIError); ok && apiErr.StatusCode == http.StatusTooManyRequests {
-				backoff = time.Duration(math.Pow(3, float64(attempt))) * c.baseRetryDelay // 6s, 18s, 54s
+				backoff = time.Duration(math.Pow(RateLimitBackoffMultiplier, float64(attempt))) * c.baseRetryDelay
 			}
 
 			jitter := time.Duration(float64(backoff) * 0.1 * (2*float64(time.Now().UnixNano()%100)/100 - 1))
@@ -148,7 +159,11 @@ func (c *Client) doRequest(
 			Retryable:  true,
 		}
 	}
-	defer func() { _ = httpResp.Body.Close() }()
+	defer func() {
+		if err := httpResp.Body.Close(); err != nil {
+			c.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	// Read response body
 	respBody, err := io.ReadAll(httpResp.Body)

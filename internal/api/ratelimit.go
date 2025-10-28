@@ -21,19 +21,11 @@ func NewRateLimiterPool() *RateLimiterPool {
 }
 
 // GetOrCreate returns an existing rate limiter or creates a new one
+// Simplified to single lock for safety and clarity (called once per model)
 func (p *RateLimiterPool) GetOrCreate(modelID string, requestsPerMinute int) *rate.Limiter {
-	p.mu.RLock()
-	limiter, exists := p.limiters[modelID]
-	p.mu.RUnlock()
-
-	if exists {
-		return limiter
-	}
-
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Double-check after acquiring write lock
 	if limiter, exists := p.limiters[modelID]; exists {
 		return limiter
 	}
@@ -41,7 +33,7 @@ func (p *RateLimiterPool) GetOrCreate(modelID string, requestsPerMinute int) *ra
 	// Create new limiter: convert requests per minute to requests per second
 	rps := float64(requestsPerMinute) / 60.0
 	burst := max(1, requestsPerMinute/10) // Allow some burst capacity
-	limiter = rate.NewLimiter(rate.Limit(rps), burst)
+	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 	p.limiters[modelID] = limiter
 
 	return limiter
