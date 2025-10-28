@@ -41,6 +41,27 @@ max_exclusion_list_size = 50
 # Only enable this if you know what you're doing and have sufficient resources.
 # disable_validation_limits = false
 
+# Enable checkpoint/resume functionality
+# Default: false
+# When enabled, saves checkpoint files during generation allowing you to resume
+# from the last saved state if the process is interrupted (Ctrl+C, crash, etc.)
+enable_checkpointing = true
+
+# Checkpoint interval (jobs)
+# Default: 10
+# Saves checkpoint every N completed preference pairs
+# Lower values = more frequent saves but slightly higher I/O overhead
+# Higher values = less frequent saves but more work lost on interruption
+# Recommended: 10-50 depending on job duration and reliability needs
+checkpoint_interval = 10
+
+# Resume from session (optional)
+# Default: "" (empty = start new session)
+# Set to a session directory name to resume from that checkpoint
+# Example: "session_2025-10-28T14-30-00"
+# You can also use: vellumforge2 checkpoint resume <session-dir>
+# resume_from_session = ""
+
 # Main model configuration (generates "chosen" responses)
 [models.main]
 base_url = "https://integrate.api.nvidia.com/v1"

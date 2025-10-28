@@ -15,23 +15,32 @@ type SessionManager struct {
 }
 
 // NewSessionManager creates a new session manager
-func NewSessionManager(logger *slog.Logger) (*SessionManager, error) {
+func NewSessionManager(logger *slog.Logger, resumeFromSession string) (*SessionManager, error) {
 	// Create output directory if it doesn't exist
 	outputDir := "output"
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Create descriptive session directory inside output
-	// Format: session_YYYY-MM-DDTHH-MM-SS
-	timestamp := time.Now().Format("2006-01-02T15-04-05")
-	sessionDir := filepath.Join(outputDir, "session_"+timestamp)
+	var sessionDir string
+	if resumeFromSession != "" {
+		// Resume mode: use existing session directory
+		sessionDir = filepath.Join(outputDir, resumeFromSession)
+		if _, err := os.Stat(sessionDir); os.IsNotExist(err) {
+			return nil, fmt.Errorf("session directory not found: %s", sessionDir)
+		}
+		logger.Info("Resuming from existing session", "path", sessionDir)
+	} else {
+		// New session: create timestamped directory
+		timestamp := time.Now().Format("2006-01-02T15-04-05")
+		sessionDir = filepath.Join(outputDir, "session_"+timestamp)
 
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create session directory: %w", err)
+		if err := os.MkdirAll(sessionDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create session directory: %w", err)
+		}
+
+		logger.Info("Created new session directory", "path", sessionDir)
 	}
-
-	logger.Info("Created session directory", "path", sessionDir)
 
 	return &SessionManager{
 		sessionDir: sessionDir,

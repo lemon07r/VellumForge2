@@ -20,9 +20,12 @@ type GenerationConfig struct {
 	NumSubtopics             int     `toml:"num_subtopics"`
 	NumPromptsPerSubtopic    int     `toml:"num_prompts_per_subtopic"`
 	Concurrency              int     `toml:"concurrency"`
-	OverGenerationBuffer     float64 `toml:"over_generation_buffer"`  // Buffer percentage (0.0-1.0, default 0.15)
-	MaxExclusionListSize     int     `toml:"max_exclusion_list_size"` // Max items in exclusion list (default 50)
+	OverGenerationBuffer     float64 `toml:"over_generation_buffer"`    // Buffer percentage (0.0-1.0, default 0.15)
+	MaxExclusionListSize     int     `toml:"max_exclusion_list_size"`   // Max items in exclusion list (default 50)
 	DisableValidationLimits  bool    `toml:"disable_validation_limits"` // Disable upper bound validation (use with caution)
+	EnableCheckpointing      bool    `toml:"enable_checkpointing"`      // Enable checkpoint/resume support
+	CheckpointInterval       int     `toml:"checkpoint_interval"`       // Save checkpoint every N completed jobs (default: 10)
+	ResumeFromSession        string  `toml:"resume_from_session"`       // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
 }
 
 // ModelConfig represents configuration for a single model endpoint
@@ -104,6 +107,10 @@ func (c *Config) Validate() error {
 	}
 	if c.Generation.OverGenerationBuffer < 0 || c.Generation.OverGenerationBuffer > 1.0 {
 		return fmt.Errorf("generation.over_generation_buffer must be between 0.0 and 1.0 (got %.2f)", c.Generation.OverGenerationBuffer)
+	}
+	if c.Generation.CheckpointInterval < 1 {
+		// Set default if not specified
+		c.Generation.CheckpointInterval = 10
 	}
 
 	// Validate main model exists

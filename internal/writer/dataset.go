@@ -18,15 +18,27 @@ type DatasetWriter struct {
 }
 
 // NewDatasetWriter creates a new dataset writer
-func NewDatasetWriter(sessionMgr *SessionManager, logger *slog.Logger) (*DatasetWriter, error) {
+func NewDatasetWriter(sessionMgr *SessionManager, logger *slog.Logger, resumeMode bool) (*DatasetWriter, error) {
 	datasetPath := sessionMgr.GetDatasetPath()
 
-	file, err := os.Create(datasetPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create dataset file: %w", err)
-	}
+	var file *os.File
+	var err error
 
-	logger.Info("Created dataset file", "path", datasetPath)
+	if resumeMode {
+		// Append mode: continue existing file
+		file, err = os.OpenFile(datasetPath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open dataset file for append: %w", err)
+		}
+		logger.Info("Opened dataset file for append", "path", datasetPath)
+	} else {
+		// Create mode: new file
+		file, err = os.Create(datasetPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create dataset file: %w", err)
+		}
+		logger.Info("Created dataset file", "path", datasetPath)
+	}
 
 	return &DatasetWriter{
 		file:   file,

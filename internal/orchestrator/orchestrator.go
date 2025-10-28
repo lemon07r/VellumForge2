@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lamim/vellumforge2/internal/api"
+	"github.com/lamim/vellumforge2/internal/checkpoint"
 	"github.com/lamim/vellumforge2/internal/config"
 	"github.com/lamim/vellumforge2/internal/judge"
 	"github.com/lamim/vellumforge2/internal/util"
@@ -20,13 +21,15 @@ import (
 
 // Orchestrator manages the entire data generation pipeline
 type Orchestrator struct {
-	cfg         *config.Config
-	secrets     *config.Secrets
-	apiClient   *api.Client
-	judgeModule *judge.Judge
-	dataWriter  *writer.DatasetWriter
-	logger      *slog.Logger
-	stats       *models.SessionStats
+	cfg           *config.Config
+	secrets       *config.Secrets
+	apiClient     *api.Client
+	judgeModule   *judge.Judge
+	dataWriter    *writer.DatasetWriter
+	logger        *slog.Logger
+	stats         *models.SessionStats
+	checkpointMgr *checkpoint.Manager
+	resumeMode    bool
 }
 
 // New creates a new orchestrator
@@ -35,6 +38,8 @@ func New(
 	secrets *config.Secrets,
 	apiClient *api.Client,
 	dataWriter *writer.DatasetWriter,
+	checkpointMgr *checkpoint.Manager,
+	resumeMode bool,
 	logger *slog.Logger,
 ) *Orchestrator {
 	var judgeModule *judge.Judge
@@ -42,30 +47,78 @@ func New(
 		judgeModule = judge.New(cfg, secrets, apiClient, logger)
 	}
 
+	stats := &models.SessionStats{
+		StartTime: time.Now(),
+	}
+
+	// In resume mode, restore stats from checkpoint
+	if resumeMode && checkpointMgr != nil {
+		cp := checkpointMgr.GetCheckpoint()
+		stats = &cp.Stats
+		// Keep original start time but update for this run
+		stats.StartTime = time.Now()
+	}
+
 	return &Orchestrator{
-		cfg:         cfg,
-		secrets:     secrets,
-		apiClient:   apiClient,
-		judgeModule: judgeModule,
-		dataWriter:  dataWriter,
-		logger:      logger,
-		stats: &models.SessionStats{
-			StartTime: time.Now(),
-		},
+		cfg:           cfg,
+		secrets:       secrets,
+		apiClient:     apiClient,
+		judgeModule:   judgeModule,
+		dataWriter:    dataWriter,
+		logger:        logger,
+		stats:         stats,
+		checkpointMgr: checkpointMgr,
+		resumeMode:    resumeMode,
 	}
 }
 
 // Run executes the complete generation pipeline
 func (o *Orchestrator) Run(ctx context.Context) error {
+	defer func() {
+		// Ensure checkpoint manager is properly closed
+		if o.checkpointMgr != nil {
+			if err := o.checkpointMgr.Close(); err != nil {
+				o.logger.Error("Failed to close checkpoint manager", "error", err)
+			}
+		}
+	}()
+
 	o.logger.Info("Starting generation pipeline",
 		"main_topic", o.cfg.Generation.MainTopic,
 		"num_subtopics", o.cfg.Generation.NumSubtopics,
-		"prompts_per_subtopic", o.cfg.Generation.NumPromptsPerSubtopic)
+		"prompts_per_subtopic", o.cfg.Generation.NumPromptsPerSubtopic,
+		"resume_mode", o.resumeMode)
 
 	// Phase 1: Generate subtopics
-	subtopics, err := o.generateSubtopics(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to generate subtopics: %w", err)
+	var subtopics []string
+	var err error
+
+	if o.resumeMode && o.checkpointMgr != nil {
+		cp := o.checkpointMgr.GetCheckpoint()
+		if cp.SubtopicsComplete {
+			subtopics = cp.Subtopics
+			o.logger.Info("Resuming from checkpoint: subtopics phase complete", "count", len(subtopics))
+		} else {
+			subtopics, err = o.generateSubtopics(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to generate subtopics: %w", err)
+			}
+			if o.checkpointMgr != nil {
+				if err := o.checkpointMgr.MarkSubtopicsComplete(subtopics); err != nil {
+					o.logger.Warn("Failed to save subtopics checkpoint", "error", err)
+				}
+			}
+		}
+	} else {
+		subtopics, err = o.generateSubtopics(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to generate subtopics: %w", err)
+		}
+		if o.checkpointMgr != nil {
+			if err := o.checkpointMgr.MarkSubtopicsComplete(subtopics); err != nil {
+				o.logger.Warn("Failed to save subtopics checkpoint", "error", err)
+			}
+		}
 	}
 
 	o.logger.Info("Generated subtopics", "count", len(subtopics))
@@ -79,9 +132,34 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	}
 
 	// Phase 2: Generate prompts for each subtopic
-	prompts, err := o.generatePrompts(ctx, subtopics)
-	if err != nil {
-		return fmt.Errorf("failed to generate prompts: %w", err)
+	var prompts []models.GenerationJob
+
+	if o.resumeMode && o.checkpointMgr != nil {
+		cp := o.checkpointMgr.GetCheckpoint()
+		if cp.PromptsComplete {
+			prompts = cp.Prompts
+			o.logger.Info("Resuming from checkpoint: prompts phase complete", "count", len(prompts))
+		} else {
+			prompts, err = o.generatePrompts(ctx, subtopics)
+			if err != nil {
+				return fmt.Errorf("failed to generate prompts: %w", err)
+			}
+			if o.checkpointMgr != nil {
+				if err := o.checkpointMgr.MarkPromptsComplete(prompts); err != nil {
+					o.logger.Warn("Failed to save prompts checkpoint", "error", err)
+				}
+			}
+		}
+	} else {
+		prompts, err = o.generatePrompts(ctx, subtopics)
+		if err != nil {
+			return fmt.Errorf("failed to generate prompts: %w", err)
+		}
+		if o.checkpointMgr != nil {
+			if err := o.checkpointMgr.MarkPromptsComplete(prompts); err != nil {
+				o.logger.Warn("Failed to save prompts checkpoint", "error", err)
+			}
+		}
 	}
 
 	o.logger.Info("Generated prompts", "count", len(prompts))
@@ -96,8 +174,20 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			"difference", len(prompts)-expectedPrompts)
 	}
 
-	// Phase 3: Generate preference pairs concurrently
-	if err := o.generatePreferencePairs(ctx, prompts); err != nil {
+	// Phase 3: Generate preference pairs concurrently (with resume filtering)
+	pendingJobs := prompts
+	if o.resumeMode && o.checkpointMgr != nil {
+		cp := o.checkpointMgr.GetCheckpoint()
+		pendingJobs = checkpoint.GetPendingJobs(cp)
+		completed := len(prompts) - len(pendingJobs)
+		o.logger.Info("Resuming from checkpoint: preference pairs phase",
+			"total", len(prompts),
+			"completed", completed,
+			"pending", len(pendingJobs),
+			"progress", fmt.Sprintf("%.1f%%", checkpoint.GetProgressPercentage(cp)))
+	}
+
+	if err := o.generatePreferencePairs(ctx, pendingJobs); err != nil {
 		return fmt.Errorf("failed to generate preference pairs: %w", err)
 	}
 
@@ -106,6 +196,13 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	o.stats.TotalDuration = o.stats.EndTime.Sub(o.stats.StartTime)
 	if o.stats.SuccessCount > 0 {
 		o.stats.AverageDuration = o.stats.TotalDuration / time.Duration(o.stats.SuccessCount)
+	}
+
+	// Mark checkpoint as complete
+	if o.checkpointMgr != nil {
+		if err := o.checkpointMgr.MarkComplete(o.stats); err != nil {
+			o.logger.Warn("Failed to save final checkpoint", "error", err)
+		}
 	}
 
 	o.logger.Info("Generation pipeline completed",
