@@ -7,11 +7,11 @@ import (
 
 func TestValidateJSONArray(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		wantValid   bool
-		wantCount   int
-		wantErrNil  bool
+		name       string
+		input      string
+		wantValid  bool
+		wantCount  int
+		wantErrNil bool
 	}{
 		{
 			name:       "valid array",

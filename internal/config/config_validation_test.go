@@ -341,11 +341,11 @@ func TestDisableValidationLimits(t *testing.T) {
 			name: "exceed limits with validation disabled",
 			cfg: Config{
 				Generation: GenerationConfig{
-					MainTopic:                "Test",
-					NumSubtopics:             50000, // > 10000 but allowed
-					NumPromptsPerSubtopic:    20000, // > 10000 but allowed
-					Concurrency:              2048,  // > 1024 but allowed
-					DisableValidationLimits:  true,  // Validation disabled
+					MainTopic:               "Test",
+					NumSubtopics:            50000, // > 10000 but allowed
+					NumPromptsPerSubtopic:   20000, // > 10000 but allowed
+					Concurrency:             2048,  // > 1024 but allowed
+					DisableValidationLimits: true,  // Validation disabled
 				},
 				Models: map[string]ModelConfig{
 					"main": {
@@ -378,11 +378,11 @@ func TestDisableValidationLimits(t *testing.T) {
 			name: "exceed limits with validation enabled",
 			cfg: Config{
 				Generation: GenerationConfig{
-					MainTopic:                "Test",
-					NumSubtopics:             50000, // > 10000
-					NumPromptsPerSubtopic:    20000, // > 10000
-					Concurrency:              2048,  // > 1024
-					DisableValidationLimits:  false, // Validation enabled
+					MainTopic:               "Test",
+					NumSubtopics:            50000, // > 10000
+					NumPromptsPerSubtopic:   20000, // > 10000
+					Concurrency:             2048,  // > 1024
+					DisableValidationLimits: false, // Validation enabled
 				},
 				Models: map[string]ModelConfig{
 					"main": {

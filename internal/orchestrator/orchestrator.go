@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -419,17 +418,31 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 
 		o.logger.Debug("Extracted JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
 
-		var prompts []string
-		if err := json.Unmarshal([]byte(jsonStr), &prompts); err != nil {
-			o.logger.Error("Failed to parse prompts JSON",
+		// PRE-VALIDATE before unmarshaling (same pattern as requestSubtopics)
+		valid, elemCount, err := ValidateJSONArray(jsonStr)
+		if !valid {
+			o.logger.Error("JSON validation failed for prompts",
 				"error", err,
 				"subtopic", subtopic,
-				"extracted_json_length", len(jsonStr),
-				"extracted_json", jsonStr,
-				"original_response_length", len(content),
-				"original_response", content)
-			return nil, fmt.Errorf("failed to parse prompts JSON: %w (response: %s)", err, content)
+				"extracted_json", util.TruncateString(jsonStr, 200),
+				"original_response", util.TruncateString(content, 200))
+			return nil, fmt.Errorf("invalid JSON response for subtopic %q: %w", subtopic, err)
 		}
+
+		o.logger.Debug("Prompts JSON validated successfully", "subtopic", subtopic, "element_count", elemCount)
+
+		// Validated unmarshal (minimum 1 prompt required per subtopic)
+		prompts, actualCount, err := ValidateStringArray(jsonStr, 1)
+		if err != nil {
+			o.logger.Error("Failed to parse prompts after validation",
+				"error", err,
+				"subtopic", subtopic,
+				"element_count", elemCount,
+				"actual_count", actualCount)
+			return nil, fmt.Errorf("failed to parse prompts for subtopic %q: %w", subtopic, err)
+		}
+
+		o.logger.Debug("Prompts parsed successfully", "subtopic", subtopic, "count", actualCount)
 
 		// Create jobs
 		for _, p := range prompts {

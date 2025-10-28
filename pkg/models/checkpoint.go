@@ -15,8 +15,8 @@ const (
 // Checkpoint represents the saved state of a generation session
 type Checkpoint struct {
 	// Session identification
-	SessionID   string    `json:"session_id"`   // UUID for this session
-	CreatedAt   time.Time `json:"created_at"`   // When session started
+	SessionID   string    `json:"session_id"`    // UUID for this session
+	CreatedAt   time.Time `json:"created_at"`    // When session started
 	LastSavedAt time.Time `json:"last_saved_at"` // Last checkpoint time
 
 	// Pipeline phase tracking

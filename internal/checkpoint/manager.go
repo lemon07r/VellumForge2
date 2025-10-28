@@ -23,8 +23,8 @@ type Manager struct {
 	checkpoint *models.Checkpoint
 	mu         sync.RWMutex
 	logger     *slog.Logger
-	interval   int  // Save every N jobs
-	jobCounter int  // Counter since last save
+	interval   int // Save every N jobs
+	jobCounter int // Counter since last save
 	enabled    bool
 
 	// Async write support
@@ -64,13 +64,13 @@ func NewManager(sessionDir string, cfg *config.Config, logger *slog.Logger) *Man
 // NewManagerFromCheckpoint creates a manager from existing checkpoint
 func NewManagerFromCheckpoint(sessionDir string, cp *models.Checkpoint, cfg *config.Config, logger *slog.Logger) *Manager {
 	m := &Manager{
-		sessionDir:  sessionDir,
-		checkpoint:  cp,
-		logger:      logger,
-		interval:    cfg.Generation.CheckpointInterval,
-		enabled:     cfg.Generation.EnableCheckpointing,
-		writeChan:   make(chan *models.Checkpoint, 10),
-		stopWriter:  make(chan struct{}),
+		sessionDir: sessionDir,
+		checkpoint: cp,
+		logger:     logger,
+		interval:   cfg.Generation.CheckpointInterval,
+		enabled:    cfg.Generation.EnableCheckpointing,
+		writeChan:  make(chan *models.Checkpoint, 10),
+		stopWriter: make(chan struct{}),
 	}
 
 	if m.enabled {

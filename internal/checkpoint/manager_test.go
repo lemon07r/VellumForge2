@@ -15,11 +15,11 @@ func TestNewManager(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{
 		Generation: config.GenerationConfig{
-			MainTopic:              "Test Topic",
-			NumSubtopics:           10,
-			NumPromptsPerSubtopic:  5,
-			EnableCheckpointing:    true,
-			CheckpointInterval:     10,
+			MainTopic:             "Test Topic",
+			NumSubtopics:          10,
+			NumPromptsPerSubtopic: 5,
+			EnableCheckpointing:   true,
+			CheckpointInterval:    10,
 		},
 	}
 
@@ -52,11 +52,11 @@ func TestSaveAndLoad(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{
 		Generation: config.GenerationConfig{
-			MainTopic:              "Test Topic",
-			NumSubtopics:           10,
-			NumPromptsPerSubtopic:  5,
-			EnableCheckpointing:    true,
-			CheckpointInterval:     1,
+			MainTopic:             "Test Topic",
+			NumSubtopics:          10,
+			NumPromptsPerSubtopic: 5,
+			EnableCheckpointing:   true,
+			CheckpointInterval:    1,
 		},
 	}
 
@@ -100,11 +100,11 @@ func TestMarkJobComplete(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{
 		Generation: config.GenerationConfig{
-			MainTopic:              "Test Topic",
-			NumSubtopics:           10,
-			NumPromptsPerSubtopic:  5,
-			EnableCheckpointing:    true,
-			CheckpointInterval:     2,
+			MainTopic:             "Test Topic",
+			NumSubtopics:          10,
+			NumPromptsPerSubtopic: 5,
+			EnableCheckpointing:   true,
+			CheckpointInterval:    2,
 		},
 	}
 
@@ -159,11 +159,11 @@ func TestAsyncWriteBuffer(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{
 		Generation: config.GenerationConfig{
-			MainTopic:              "Test Topic",
-			NumSubtopics:           10,
-			NumPromptsPerSubtopic:  5,
-			EnableCheckpointing:    true,
-			CheckpointInterval:     5, // Save every 5 jobs (more realistic)
+			MainTopic:             "Test Topic",
+			NumSubtopics:          10,
+			NumPromptsPerSubtopic: 5,
+			EnableCheckpointing:   true,
+			CheckpointInterval:    5, // Save every 5 jobs (more realistic)
 		},
 	}
 
@@ -219,11 +219,11 @@ func TestCheckpointNotEnabledNoFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{
 		Generation: config.GenerationConfig{
-			MainTopic:              "Test Topic",
-			NumSubtopics:           10,
-			NumPromptsPerSubtopic:  5,
-			EnableCheckpointing:    false, // Disabled
-			CheckpointInterval:     10,
+			MainTopic:             "Test Topic",
+			NumSubtopics:          10,
+			NumPromptsPerSubtopic: 5,
+			EnableCheckpointing:   false, // Disabled
+			CheckpointInterval:    10,
 		},
 	}
 
