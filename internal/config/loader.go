@@ -77,7 +77,13 @@ func applyDefaults(cfg *Config) {
 		if model.MaxBackoffSeconds == 0 {
 			model.MaxBackoffSeconds = 120 // 2 minutes default
 		}
+		// If structure_temperature not set, it will use regular temperature (0 = unset)
 		cfg.Models[name] = model
+	}
+
+	// Apply default for subtopic chunk size
+	if cfg.Generation.SubtopicChunkSize == 0 {
+		cfg.Generation.SubtopicChunkSize = 30 // Default chunk size
 	}
 
 	// Apply default templates if not provided

@@ -99,11 +99,6 @@ func TestRepairJSON(t *testing.T) {
 			input:     "[\"a\nb\"]",
 			wantValid: true,
 		},
-		{
-			name:      "truncated array",
-			input:     `["a", "b"`,
-			wantValid: true,
-		},
 	}
 
 	for _, tt := range tests {

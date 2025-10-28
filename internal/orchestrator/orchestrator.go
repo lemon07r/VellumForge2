@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -230,16 +231,60 @@ func (o *Orchestrator) generateSubtopics(ctx context.Context) ([]string, error) 
 	requestCount := int(float64(targetCount) * multiplier)
 
 	bufferPercent := int(o.cfg.Generation.OverGenerationBuffer * 100)
-	o.logger.Info("Generating subtopics with over-generation strategy",
-		"target", targetCount,
-		"requesting", requestCount,
-		"buffer_percent", bufferPercent)
 
-	// First attempt: Request slightly more than needed
-	subtopics, err := o.requestSubtopics(ctx, requestCount, nil)
-	if err != nil {
-		return nil, fmt.Errorf("initial subtopic generation failed: %w", err)
+	// Determine chunk size (default 30, or 0 to disable chunking)
+	chunkSize := o.cfg.Generation.SubtopicChunkSize
+	if chunkSize == 0 {
+		chunkSize = requestCount // Single request (old behavior)
 	}
+
+	// Log strategy
+	if chunkSize < requestCount {
+		o.logger.Info("Generating subtopics with chunking and over-generation strategy",
+			"target", targetCount,
+			"requesting", requestCount,
+			"chunk_size", chunkSize,
+			"num_chunks", (requestCount+chunkSize-1)/chunkSize,
+			"buffer_percent", bufferPercent)
+	} else {
+		o.logger.Info("Generating subtopics with over-generation strategy (no chunking)",
+			"target", targetCount,
+			"requesting", requestCount,
+			"buffer_percent", bufferPercent)
+	}
+
+	// Request subtopics in chunks
+	var allSubtopics []string
+	remaining := requestCount
+
+	for remaining > 0 {
+		currentChunk := chunkSize
+		if currentChunk > remaining {
+			currentChunk = remaining
+		}
+
+		o.logger.Debug("Requesting subtopic chunk",
+			"chunk_size", currentChunk,
+			"remaining", remaining,
+			"collected", len(allSubtopics))
+
+		chunkSubtopics, err := o.requestSubtopics(ctx, currentChunk, nil)
+		if err != nil {
+			if len(allSubtopics) > 0 {
+				// Partial success - log warning and continue with what we have
+				o.logger.Warn("Chunk request failed, continuing with partial results",
+					"error", err,
+					"collected_so_far", len(allSubtopics))
+				break
+			}
+			return nil, fmt.Errorf("initial subtopic generation failed: %w", err)
+		}
+
+		allSubtopics = append(allSubtopics, chunkSubtopics...)
+		remaining -= currentChunk
+	}
+
+	subtopics := allSubtopics
 
 	// Deduplicate
 	uniqueSubtopics := deduplicateStrings(subtopics)
@@ -266,14 +311,14 @@ func (o *Orchestrator) generateSubtopics(ctx context.Context) ([]string, error) 
 		"shortage", shortage)
 
 	// Retry with exclusion list (but simpler prompt)
-	retrySubtopics, err := o.requestSubtopics(ctx, shortage, uniqueSubtopics)
-	if err != nil {
-		o.logger.Warn("Retry failed, proceeding with partial results", "error", err)
+	retrySubtopics, retryErr := o.requestSubtopics(ctx, shortage, uniqueSubtopics)
+	if retryErr != nil {
+		o.logger.Warn("Retry failed, proceeding with partial results", "error", retryErr)
 		return uniqueSubtopics, nil // Return what we have
 	}
 
 	// Merge and deduplicate again
-	allSubtopics := append(uniqueSubtopics, retrySubtopics...)
+	allSubtopics = append(uniqueSubtopics, retrySubtopics...)
 	finalUnique := deduplicateStrings(allSubtopics)
 
 	o.logger.Info("Subtopic generation complete after retry",
@@ -336,11 +381,11 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 		return nil, fmt.Errorf("failed to render template: %w", err)
 	}
 
-	// Call API
+	// Call API with structured output optimization
 	mainModel := o.cfg.Models["main"]
 	apiKey := o.secrets.GetAPIKey(mainModel.BaseURL)
 
-	resp, err := o.apiClient.ChatCompletion(ctx, mainModel, apiKey, []api.Message{
+	resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, []api.Message{
 		{Role: "user", Content: prompt},
 	})
 	if err != nil {
@@ -350,30 +395,40 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 	content := resp.Choices[0].Message.Content
 	o.logger.Debug("Received subtopics response", "length", len(content))
 
-	// Extract and sanitize JSON
+	// Extract and repair JSON
 	jsonStr := extractJSON(content)
 	o.logger.Debug("Extracted JSON", "length", len(jsonStr))
 
-	// Repair common JSON issues from LLM responses
 	jsonStr = util.RepairJSON(jsonStr)
 	o.logger.Debug("Repaired JSON", "length", len(jsonStr))
 
-	// PRE-VALIDATE before unmarshaling
+	// Try validation first (advisory)
 	valid, elemCount, err := ValidateJSONArray(jsonStr)
-	if !valid {
-		o.logger.Error("JSON validation failed",
+	if valid {
+		o.logger.Debug("JSON validated successfully", "element_count", elemCount)
+	} else {
+		o.logger.Warn("JSON validation failed, attempting unmarshal anyway",
 			"error", err,
-			"extracted_json", util.TruncateString(jsonStr, 200),
-			"original_response", util.TruncateString(content, 200))
-		return nil, fmt.Errorf("invalid JSON response: %w", err)
+			"extracted_json", util.TruncateString(jsonStr, 200))
 	}
 
-	o.logger.Debug("JSON validated successfully", "element_count", elemCount)
-
-	// Validated unmarshal (minimum 1 element required)
+	// Attempt unmarshal with validation (with fallback to basic unmarshal)
 	subtopics, actualCount, err := ValidateStringArray(jsonStr, 1)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse subtopics: %w", err)
+		// Fallback: try basic unmarshal (old behavior)
+		o.logger.Warn("ValidateStringArray failed, trying basic unmarshal", "error", err)
+		var basicSubtopics []string
+		if unmarshalErr := json.Unmarshal([]byte(jsonStr), &basicSubtopics); unmarshalErr != nil {
+			o.logger.Error("Both validation and basic unmarshal failed",
+				"validation_error", err,
+				"unmarshal_error", unmarshalErr,
+				"extracted_json", util.TruncateString(jsonStr, 200),
+				"original_response", util.TruncateString(content, 200))
+			return nil, fmt.Errorf("failed to parse subtopics: %w (unmarshal also failed: %v)", err, unmarshalErr)
+		}
+		subtopics = basicSubtopics
+		actualCount = len(basicSubtopics)
+		o.logger.Info("Basic unmarshal succeeded", "count", actualCount)
 	}
 
 	o.logger.Info("Subtopics parsed successfully",
@@ -405,7 +460,7 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		mainModel := o.cfg.Models["main"]
 		apiKey := o.secrets.GetAPIKey(mainModel.BaseURL)
 
-		resp, err := o.apiClient.ChatCompletion(ctx, mainModel, apiKey, []api.Message{
+		resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, []api.Message{
 			{Role: "user", Content: prompt},
 		})
 		if err != nil {
@@ -426,31 +481,40 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		jsonStr = util.RepairJSON(jsonStr)
 		o.logger.Debug("Repaired JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
 
-		// PRE-VALIDATE before unmarshaling (same pattern as requestSubtopics)
+		// Try validation first (advisory)
 		valid, elemCount, err := ValidateJSONArray(jsonStr)
-		if !valid {
-			o.logger.Error("JSON validation failed for prompts",
+		if valid {
+			o.logger.Debug("Prompts JSON validated successfully", "subtopic", subtopic, "element_count", elemCount)
+		} else {
+			o.logger.Warn("JSON validation failed for prompts, attempting unmarshal anyway",
 				"error", err,
 				"subtopic", subtopic,
-				"extracted_json", util.TruncateString(jsonStr, 200),
-				"original_response", util.TruncateString(content, 200))
-			return nil, fmt.Errorf("invalid JSON response for subtopic %q: %w", subtopic, err)
+				"extracted_json", util.TruncateString(jsonStr, 200))
 		}
 
-		o.logger.Debug("Prompts JSON validated successfully", "subtopic", subtopic, "element_count", elemCount)
-
-		// Validated unmarshal (minimum 1 prompt required per subtopic)
+		// Attempt unmarshal with validation (with fallback to basic unmarshal)
 		prompts, actualCount, err := ValidateStringArray(jsonStr, 1)
 		if err != nil {
-			o.logger.Error("Failed to parse prompts after validation",
+			// Fallback: try basic unmarshal (old behavior)
+			o.logger.Warn("ValidateStringArray failed for prompts, trying basic unmarshal",
 				"error", err,
-				"subtopic", subtopic,
-				"element_count", elemCount,
-				"actual_count", actualCount)
-			return nil, fmt.Errorf("failed to parse prompts for subtopic %q: %w", subtopic, err)
+				"subtopic", subtopic)
+			var basicPrompts []string
+			if unmarshalErr := json.Unmarshal([]byte(jsonStr), &basicPrompts); unmarshalErr != nil {
+				o.logger.Error("Both validation and basic unmarshal failed for prompts",
+					"validation_error", err,
+					"unmarshal_error", unmarshalErr,
+					"subtopic", subtopic,
+					"extracted_json", util.TruncateString(jsonStr, 200),
+					"original_response", util.TruncateString(content, 200))
+				return nil, fmt.Errorf("failed to parse prompts for subtopic %q: %w (unmarshal also failed: %v)", subtopic, err, unmarshalErr)
+			}
+			prompts = basicPrompts
+			actualCount = len(basicPrompts)
+			o.logger.Info("Basic unmarshal succeeded for prompts", "subtopic", subtopic, "count", actualCount)
+		} else {
+			o.logger.Debug("Prompts parsed successfully", "subtopic", subtopic, "count", actualCount)
 		}
-
-		o.logger.Debug("Prompts parsed successfully", "subtopic", subtopic, "count", actualCount)
 
 		// Create jobs
 		for _, p := range prompts {

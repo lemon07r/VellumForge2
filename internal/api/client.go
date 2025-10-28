@@ -74,6 +74,11 @@ func (c *Client) ChatCompletion(
 		N:           1,
 	}
 
+	// Enable JSON mode if configured
+	if modelCfg.UseJSONMode {
+		req.ResponseFormat = &ResponseFormat{Type: "json_object"}
+	}
+
 	// Retry with exponential backoff
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
@@ -114,6 +119,13 @@ func (c *Client) ChatCompletion(
 
 		resp, err := c.doRequest(ctx, modelCfg.BaseURL, apiKey, req)
 		if err == nil {
+			// Check finish_reason for truncation
+			if len(resp.Choices) > 0 && resp.Choices[0].FinishReason == "length" {
+				c.logger.Warn("Response truncated due to max_tokens limit",
+					"model", modelCfg.ModelName,
+					"max_tokens", modelCfg.MaxOutputTokens,
+					"finish_reason", resp.Choices[0].FinishReason)
+			}
 			return resp, nil
 		}
 
@@ -126,6 +138,28 @@ func (c *Client) ChatCompletion(
 	}
 
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
+// ChatCompletionStructured sends a chat completion request optimized for structured JSON output
+// Uses structure_temperature if set, otherwise falls back to regular temperature
+// Automatically enables JSON mode if configured
+func (c *Client) ChatCompletionStructured(
+	ctx context.Context,
+	modelCfg config.ModelConfig,
+	apiKey string,
+	messages []Message,
+) (*ChatCompletionResponse, error) {
+	// Use structure_temperature if set, otherwise use regular temperature
+	tempCfg := modelCfg
+	if modelCfg.StructureTemperature > 0 {
+		tempCfg.Temperature = modelCfg.StructureTemperature
+		c.logger.Debug("Using structure_temperature for JSON generation",
+			"structure_temp", modelCfg.StructureTemperature,
+			"regular_temp", modelCfg.Temperature)
+	}
+
+	// Call regular ChatCompletion with modified config
+	return c.ChatCompletion(ctx, tempCfg, apiKey, messages)
 }
 
 func (c *Client) doRequest(

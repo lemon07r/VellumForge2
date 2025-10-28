@@ -9,6 +9,12 @@ main_topic = "Fantasy Fiction"
 # Range: 1-10000 (can be increased with disable_validation_limits)
 num_subtopics = 8
 
+# Subtopic chunk size for JSON generation (default: 30, recommended: 20-50)
+# Requesting subtopics in chunks significantly reduces JSON parsing errors
+# Set to 0 to request all at once (not recommended for large counts)
+# Example: For 100 subtopics with chunk_size=30, makes 4 requests (30+30+30+10)
+subtopic_chunk_size = 30
+
 # Number of prompts to generate per subtopic
 # Range: 1-10000 (can be increased with disable_validation_limits)
 num_prompts_per_subtopic = 4
@@ -66,8 +72,10 @@ checkpoint_interval = 10
 [models.main]
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "moonshotai/kimi-k2-instruct-0905"
-temperature = 0.6
+temperature = 0.6  # For creative content generation
+structure_temperature = 0.2  # For JSON/structured output (optional, lower = more reliable)
 top_p = 1.0
+use_json_mode = false  # Enable if your API supports response_format (OpenAI, etc.)
 top_k = -1  # -1 disables top_k
 min_p = 0.0  # 0.0 disables min_p
 max_output_tokens = 16384

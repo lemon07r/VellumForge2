@@ -18,6 +18,7 @@ type Config struct {
 type GenerationConfig struct {
 	MainTopic               string  `toml:"main_topic"`
 	NumSubtopics            int     `toml:"num_subtopics"`
+	SubtopicChunkSize       int     `toml:"subtopic_chunk_size"` // Request subtopics in chunks (0=all at once, default: 30)
 	NumPromptsPerSubtopic   int     `toml:"num_prompts_per_subtopic"`
 	Concurrency             int     `toml:"concurrency"`
 	OverGenerationBuffer    float64 `toml:"over_generation_buffer"`    // Buffer percentage (0.0-1.0, default 0.15)
@@ -30,17 +31,19 @@ type GenerationConfig struct {
 
 // ModelConfig represents configuration for a single model endpoint
 type ModelConfig struct {
-	BaseURL            string  `toml:"base_url"`
-	ModelName          string  `toml:"model_name"`
-	Temperature        float64 `toml:"temperature"`
-	TopP               float64 `toml:"top_p"`
-	TopK               int     `toml:"top_k"`
-	MinP               float64 `toml:"min_p"`
-	MaxOutputTokens    int     `toml:"max_output_tokens"`
-	ContextSize        int     `toml:"context_size"`
-	RateLimitPerMinute int     `toml:"rate_limit_per_minute"`
-	MaxBackoffSeconds  int     `toml:"max_backoff_seconds"` // Optional: max backoff duration (default 120)
-	Enabled            bool    `toml:"enabled"`             // Only used for judge model
+	BaseURL              string  `toml:"base_url"`
+	ModelName            string  `toml:"model_name"`
+	Temperature          float64 `toml:"temperature"`
+	StructureTemperature float64 `toml:"structure_temperature"` // Temperature for JSON generation (optional, defaults to temperature)
+	TopP                 float64 `toml:"top_p"`
+	TopK                 int     `toml:"top_k"`
+	MinP                 float64 `toml:"min_p"`
+	MaxOutputTokens      int     `toml:"max_output_tokens"`
+	ContextSize          int     `toml:"context_size"`
+	RateLimitPerMinute   int     `toml:"rate_limit_per_minute"`
+	MaxBackoffSeconds    int     `toml:"max_backoff_seconds"` // Optional: max backoff duration (default 120)
+	UseJSONMode          bool    `toml:"use_json_mode"`       // Enable structured JSON output mode (optional)
+	Enabled              bool    `toml:"enabled"`             // Only used for judge model
 }
 
 // PromptTemplates holds all customizable prompt templates
