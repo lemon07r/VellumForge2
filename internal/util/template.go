@@ -20,3 +20,11 @@ func RenderTemplate(tmpl string, data map[string]interface{}) (string, error) {
 
 	return buf.String(), nil
 }
+
+// TruncateString truncates a string to maxLen characters
+func TruncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}

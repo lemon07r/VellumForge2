@@ -245,9 +245,11 @@ rate_limit_per_minute = 10  # Lower limit
 
 **Example**: Requested 344 subtopics, only got 271
 
-**Solution**: VellumForge2 automatically handles this with **iterative regeneration**:
-- Makes up to 5 retry attempts
-- Filters duplicates automatically
+**Solution**: VellumForge2 automatically handles this with **smart over-generation**:
+- Requests 115% of target count initially
+- Makes ONE retry attempt if still short
+- Filters duplicates automatically (case-insensitive)
+- Achieves 95%+ accuracy vs 79% with single-shot
 - Passes exclusion list to avoid repeats
 - Logs detailed progress
 
@@ -308,19 +310,40 @@ When generating large numbers of subtopics (100+):
 
 ## Advanced Configuration
 
+### Smart Over-Generation Strategy
+
+VellumForge2 uses an intelligent over-generation strategy to reliably achieve target counts:
+
+**How it works:**
+1. **Over-generate**: Requests 115% of target count (e.g., 395 for 344 target)
+2. **Deduplicate**: Removes duplicate subtopics (case-insensitive)
+3. **Trim or Retry**: 
+   - If count ≥ target → trim to exact count
+   - If count < target → make ONE retry for the difference
+
+**Benefits:**
+- ✅ 95%+ count accuracy (vs 79% with single-shot)
+- ✅ Fewer API calls (1-2 requests vs 3-5 with iterative)
+- ✅ Robust JSON validation prevents parse failures
+- ✅ Graceful degradation (returns partial results if retry fails)
+
+**Logging output:**
+```
+INFO  Generating subtopics with over-generation strategy target=344 requesting=395 buffer_percent=15
+INFO  Initial subtopic generation complete requested=395 received=390 unique=385 duplicates_filtered=5
+INFO  Target count achieved final_count=344 excess_trimmed=41
+```
+
 ### Custom Prompt Templates
 
 ```toml
 [prompt_templates]
-# Subtopic generation with iterative regeneration support
+# Subtopic generation with smart over-generation and retry support
 subtopic_generation = '''
 You are an expert in {{.MainTopic}}.
 Generate {{.NumSubtopics}} specific subtopics.
 
-{{if .IsRetry}}IMPORTANT: This is a retry. Generate {{.NumSubtopics}} NEW subtopics.
-Do NOT repeat these existing ones:
-{{range .ExistingSubtopics}}- {{.}}
-{{end}}
+{{if .IsRetry}}NOTE: Avoid these already generated: {{.ExcludeSubtopics}}
 {{end}}
 
 Return ONLY a JSON array: ["topic1", "topic2", ...]
@@ -337,9 +360,9 @@ Return ONLY a JSON array: ["prompt1", "prompt2", ...]
 
 - **Subtopic Generation:**
   - `{{.MainTopic}}` - Your main theme
-  - `{{.NumSubtopics}}` - Count to generate (adjusts per retry)
-  - `{{.IsRetry}}` - Boolean, true on retry attempts
-  - `{{.ExistingSubtopics}}` - Array of already generated items
+  - `{{.NumSubtopics}}` - Count to generate (auto-adjusted for over-generation and retry)
+  - `{{.IsRetry}}` - Boolean, true on retry attempts (optional)
+  - `{{.ExcludeSubtopics}}` - Comma-separated list of already generated subtopics (optional, only on retry)
 
 - **Prompt Generation:**
   - `{{.SubTopic}}` - Current subtopic

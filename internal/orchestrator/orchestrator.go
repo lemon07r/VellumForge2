@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,15 +127,90 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 }
 
 func (o *Orchestrator) generateSubtopics(ctx context.Context) ([]string, error) {
-	o.logger.Info("Generating subtopics...")
+	targetCount := o.cfg.Generation.NumSubtopics
+
+	// STRATEGY: Request 115% to account for LLM undershoot and duplicates
+	requestCount := int(float64(targetCount) * 1.15)
+
+	o.logger.Info("Generating subtopics with over-generation strategy",
+		"target", targetCount,
+		"requesting", requestCount,
+		"buffer_percent", 15)
+
+	// First attempt: Request slightly more than needed
+	subtopics, err := o.requestSubtopics(ctx, requestCount, nil)
+	if err != nil {
+		return nil, fmt.Errorf("initial subtopic generation failed: %w", err)
+	}
+
+	// Deduplicate
+	uniqueSubtopics := deduplicateStrings(subtopics)
+
+	o.logger.Info("Initial subtopic generation complete",
+		"requested", requestCount,
+		"received", len(subtopics),
+		"unique", len(uniqueSubtopics),
+		"duplicates_filtered", len(subtopics)-len(uniqueSubtopics))
+
+	// If we have enough, trim and return
+	if len(uniqueSubtopics) >= targetCount {
+		trimmed := uniqueSubtopics[:targetCount]
+		o.logger.Info("Target count achieved",
+			"final_count", len(trimmed),
+			"excess_trimmed", len(uniqueSubtopics)-targetCount)
+		return trimmed, nil
+	}
+
+	// If we're short, make ONE retry for the difference
+	shortage := targetCount - len(uniqueSubtopics)
+	o.logger.Warn("Subtopic count below target, attempting recovery",
+		"current", len(uniqueSubtopics),
+		"shortage", shortage)
+
+	// Retry with exclusion list (but simpler prompt)
+	retrySubtopics, err := o.requestSubtopics(ctx, shortage, uniqueSubtopics)
+	if err != nil {
+		o.logger.Warn("Retry failed, proceeding with partial results", "error", err)
+		return uniqueSubtopics, nil // Return what we have
+	}
+
+	// Merge and deduplicate again
+	allSubtopics := append(uniqueSubtopics, retrySubtopics...)
+	finalUnique := deduplicateStrings(allSubtopics)
+
+	o.logger.Info("Subtopic generation complete after retry",
+		"final_count", len(finalUnique),
+		"target", targetCount,
+		"success", len(finalUnique) >= targetCount)
+
+	// Return what we have (may be less than target)
+	if len(finalUnique) > targetCount {
+		return finalUnique[:targetCount], nil
+	}
+	return finalUnique, nil
+}
+
+// requestSubtopics makes a single API call for subtopics
+// exclusionList is optional (nil on first call, populated on retry)
+func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusionList []string) ([]string, error) {
+	// Build template data
+	templateData := map[string]interface{}{
+		"MainTopic":    o.cfg.Generation.MainTopic,
+		"NumSubtopics": count,
+	}
+
+	// Add exclusion list if present (for retry)
+	if len(exclusionList) > 0 {
+		// Format as simple comma-separated list to keep LLM focused
+		excluded := strings.Join(exclusionList, ", ")
+		templateData["ExcludeSubtopics"] = excluded
+		templateData["IsRetry"] = true
+	}
 
 	// Render template
-	prompt, err := util.RenderTemplate(o.cfg.PromptTemplates.SubtopicGeneration, map[string]interface{}{
-		"MainTopic":    o.cfg.Generation.MainTopic,
-		"NumSubtopics": o.cfg.Generation.NumSubtopics,
-	})
+	prompt, err := util.RenderTemplate(o.cfg.PromptTemplates.SubtopicGeneration, templateData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to render subtopic template: %w", err)
+		return nil, fmt.Errorf("failed to render template: %w", err)
 	}
 
 	// Call API
@@ -148,21 +224,34 @@ func (o *Orchestrator) generateSubtopics(ctx context.Context) ([]string, error) 
 		return nil, err
 	}
 
-	// Parse JSON response
 	content := resp.Choices[0].Message.Content
-
 	o.logger.Debug("Received subtopics response", "length", len(content))
 
-	// Extract JSON from potential markdown code blocks
+	// Extract and sanitize JSON
 	jsonStr := extractJSON(content)
+	o.logger.Debug("Extracted JSON", "length", len(jsonStr))
 
-	o.logger.Debug("Extracted JSON", "length", len(jsonStr), "json", jsonStr)
-
-	var subtopics []string
-	if err := json.Unmarshal([]byte(jsonStr), &subtopics); err != nil {
-		o.logger.Error("Failed to parse subtopics JSON", "error", err, "extracted_json", jsonStr, "original_response", content)
-		return nil, fmt.Errorf("failed to parse subtopics JSON: %w (response: %s)", err, content)
+	// PRE-VALIDATE before unmarshaling
+	valid, elemCount, err := ValidateJSONArray(jsonStr)
+	if !valid {
+		o.logger.Error("JSON validation failed",
+			"error", err,
+			"extracted_json", util.TruncateString(jsonStr, 200),
+			"original_response", util.TruncateString(content, 200))
+		return nil, fmt.Errorf("invalid JSON response: %w", err)
 	}
+
+	o.logger.Debug("JSON validated successfully", "element_count", elemCount)
+
+	// Validated unmarshal (minimum 1 element required)
+	subtopics, actualCount, err := ValidateStringArray(jsonStr, 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse subtopics: %w", err)
+	}
+
+	o.logger.Info("Subtopics parsed successfully",
+		"requested", count,
+		"received", actualCount)
 
 	return subtopics, nil
 }
