@@ -4,7 +4,7 @@ This guide will help you get VellumForge2 up and running in minutes.
 
 ## Prerequisites
 
-- Go 1.21 or higher
+- Go 1.25 or higher
 - API key for an OpenAI-compatible LLM provider (e.g., NVIDIA, OpenAI, Together AI), or local server for serving an OpenAI-compatible API endpoint (llama.cpp or kobold.cpp server, etc)
 - (Optional) Hugging Face account with write token for dataset uploads
 
@@ -333,10 +333,10 @@ rate_limit_per_minute = 5  # Minimal rate
 
 ## Getting Help
 
-- 📖 Read the [full README](README.md)
-- 🐛 Report bugs in [GitHub Issues](https://github.com/lamim/vellumforge2/issues)
-- 💬 Ask questions in [Discussions](https://github.com/lamim/vellumforge2/discussions)
-- 📚 Check [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
+- Read the [full README](README.md)
+- Report bugs in [GitHub Issues](https://github.com/lamim/vellumforge2/issues)
+- Ask questions in [Discussions](https://github.com/lamim/vellumforge2/discussions)
+- Check [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 
 ## Example: Complete First Run
 
