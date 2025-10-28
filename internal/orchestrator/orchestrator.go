@@ -307,6 +307,7 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 	templateData := map[string]interface{}{
 		"MainTopic":    o.cfg.Generation.MainTopic,
 		"NumSubtopics": count,
+		"IsRetry":      false, // Default to false
 	}
 
 	// Add exclusion list if present (for retry)
