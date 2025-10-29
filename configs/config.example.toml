@@ -75,11 +75,13 @@ model_name = "moonshotai/kimi-k2-instruct-0905"
 temperature = 0.6  # For creative content generation
 structure_temperature = 0.2  # For JSON/structured output (optional, lower = more reliable)
 top_p = 1.0
-use_json_mode = false  # Enable if your API supports response_format (OpenAI, etc.)
+use_json_mode = false  # Enable if your API supports response_format AND returns unwrapped arrays
+                       # NOTE: Some models (kimi-k2) wrap arrays in objects {"key":[...]} which breaks parsing
+                       # Recommendation: Use concrete prompt examples instead (see prompt_templates)
 top_k = -1  # -1 disables top_k
 min_p = 0.0  # 0.0 disables min_p
 max_output_tokens = 16384
-context_size = 16384
+context_size = 262144
 rate_limit_per_minute = 20
 
 # Optional: Maximum backoff duration in seconds for rate limit retries
@@ -93,7 +95,7 @@ rate_limit_per_minute = 20
 [models.rejected]
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "meta/llama-3.1-8b-instruct"
-temperature = 0.8 
+temperature = 0.8
 top_p = 1.0
 top_k = -1
 min_p = 0.0
@@ -134,21 +136,33 @@ Each subtopic should be:
 - Rich with potential for creative exploration
 - Grounded in the fantasy genre
 
-Return ONLY a valid JSON array of strings (no markdown, no additional text):
-["Subtopic 1", "Subtopic 2", ...]'''
+Return ONLY a valid JSON array of strings. Example format:
+[
+  "A library where overdue books age the borrower",
+  "Ancient dragons awakening in corporate boardrooms",
+  "Time-traveling archaeologists disrupting history"
+]
+
+Now generate {{.NumSubtopics}} unique subtopics (JSON array only, no markdown):'''
 
 prompt_generation = '''You are a creative writing prompt generator specializing in fantasy fiction. Generate {{.NumPrompts}} unique and compelling story prompts for the subtopic: "{{.SubTopic}}".
 
 Each prompt should:
-- Be detailed enough to inspire a complete short story (2-4 sentences)
+- Be detailed enough to inspire a complete short story (2-3 sentences)
 - Include specific characters, settings, or situations
 - Have inherent conflict or tension
 - Be suitable for fantasy fiction writing
 - Be distinct from the other prompts
 - Occasionally contain some sensitive, mature or NSFW themes
 
-Return ONLY a valid JSON array of strings (no markdown, no additional text):
-["Prompt 1", "Prompt 2", ...]'''
+Return ONLY a valid JSON array of strings. Example format:
+[
+  "A young librarian discovers that returning books late causes her to age rapidly. With only days until her 90th birthday despite being 25, she must find the ancient tome that reverses the curse.",
+  "The head archivist secretly keeps forbidden books that grant immortality. When a desperate scholar breaks in to steal one, they accidentally release a curse that begins aging everyone in the city.",
+  "In a world where books are living creatures, an overdue romance novel has been stalking its borrower for months, growing more obsessive with each passing day."
+]
+
+Now generate {{.NumPrompts}} unique prompts for "{{.SubTopic}}" (JSON array only, no markdown):'''
 
 chosen_generation = '''You are a talented fantasy fiction writer. Write a compelling short story (400-600 words) based on the following prompt:
 
