@@ -82,9 +82,10 @@ func findMatchingBracket(s string, startPos int, openChar, closeChar rune) int {
 
 		// Only count brackets outside of strings
 		if !inString {
-			if ch == openChar {
+			switch ch {
+			case openChar:
 				count++
-			} else if ch == closeChar {
+			case closeChar:
 				count--
 				if count == 0 {
 					return i
