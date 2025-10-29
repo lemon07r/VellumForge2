@@ -7,23 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - 2025-10-29
-
-### Added
-- Automatic `.gitattributes` generation in HuggingFace uploads to prevent JSONL files from being stored in Git LFS with `-text` flag
-- Comprehensive documentation on newline encoding for training datasets
-- Analysis tools for dataset schema validation
-
-### Changed
-- HuggingFace upload module now automatically creates proper `.gitattributes` file during uploads
-- `.gitattributes` explicitly excludes `*.jsonl` files from LFS to ensure proper text rendering in dataset viewer
-
-### Fixed
-- HuggingFace dataset viewer now properly renders newlines in JSONL files instead of showing literal `\n\n`
-- Improved documentation on dataset encoding standards for LLM training
-
----
-
 ## [1.3.7] - 2025-10-29
 
 ### Added
@@ -40,11 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatically converts `"key": 'value'` to `"key": "value"`
   - Properly escapes double quotes within single-quoted strings
   - Fixes issues with judge responses from kimi-k2-instruct-0905
+- **Other**
+  - Automatic `.gitattributes` generation in HuggingFace uploads to prevent JSONL files from being stored in Git LFS with `-text` flag
+  - Comprehensive documentation on newline encoding for training datasets
+  - Analysis tools for dataset schema validation
 
 ### Changed
 - Refactored `Uploader` struct to use four separate HTTP clients for different operation types
 - Increased default HTTP timeout from 120s to 300-600s depending on operation type
 - `Upload()` method now uses retry-enabled functions for LFS operations
+- HuggingFace upload module now automatically creates proper `.gitattributes` file during uploads
+- `.gitattributes` explicitly excludes `*.jsonl` files from LFS to ensure proper text rendering in dataset viewer
 
 ### Fixed
 - **Critical Dataset Schema Bug**: Fixed type inconsistency in `calculateAverageScore()` function
@@ -54,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HuggingFace upload failures due to HTTP timeouts for large files (18MB+)
 - Network resilience: transient failures no longer cause entire upload to fail
 - JSON parsing errors from judge model responses with single-quoted strings
-
+- HuggingFace dataset viewer now properly renders newlines in JSONL files instead of showing literal `\n\n`
 
 ### Performance
 - Expected upload success rate improvement: 0% → 95%+
