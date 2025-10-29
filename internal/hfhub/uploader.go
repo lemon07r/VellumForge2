@@ -2,6 +2,7 @@ package hfhub
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,11 +14,29 @@ import (
 	"time"
 )
 
+const (
+	// DefaultTimeout is the default timeout for general API operations
+	DefaultTimeout = 300 * time.Second
+	// PreuploadTimeout is the timeout for LFS preupload requests
+	PreuploadTimeout = 300 * time.Second
+	// LFSUploadTimeout is the timeout for actual LFS file uploads
+	LFSUploadTimeout = 600 * time.Second
+	// CommitTimeout is the timeout for commit operations
+	CommitTimeout = 300 * time.Second
+	// LogPreviewLength is the maximum length for log previews
+	LogPreviewLength = 500
+	// MaxRetries is the maximum number of retries for failed operations
+	MaxRetries = 3
+)
+
 // Uploader handles uploading datasets to Hugging Face Hub
 type Uploader struct {
-	token      string
-	httpClient *http.Client
-	logger     *slog.Logger
+	token           string
+	httpClient      *http.Client      // For general operations
+	preuploadClient *http.Client      // For LFS preupload
+	lfsClient       *http.Client      // For LFS file uploads
+	commitClient    *http.Client      // For commit operations
+	logger          *slog.Logger
 }
 
 // NewUploader creates a new Hugging Face Hub uploader
@@ -25,7 +44,16 @@ func NewUploader(token string, logger *slog.Logger) *Uploader {
 	return &Uploader{
 		token: token,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // 120 seconds timeout
+			Timeout: DefaultTimeout,
+		},
+		preuploadClient: &http.Client{
+			Timeout: PreuploadTimeout,
+		},
+		lfsClient: &http.Client{
+			Timeout: LFSUploadTimeout,
+		},
+		commitClient: &http.Client{
+			Timeout: CommitTimeout,
 		},
 		logger: logger.With("component", "hf_uploader"),
 	}
@@ -55,6 +83,16 @@ func (u *Uploader) Upload(repoID, sessionDir string) error {
 	operations := []CommitOperation{}
 	lfsFiles := []LFSPointer{}
 	filePaths := make(map[string]string) // oid -> filePath
+
+	// Add .gitattributes to ensure proper text rendering
+	// This prevents HuggingFace from adding dataset.jsonl to LFS with -text flag
+	gitattributesOp, err := u.createGitAttributesOperation()
+	if err != nil {
+		u.logger.Warn("Failed to create .gitattributes, continuing without it", "error", err)
+	} else {
+		operations = append(operations, *gitattributesOp)
+		u.logger.Debug("Added .gitattributes to operations")
+	}
 
 	for localFilename, hfFilename := range filesToUpload {
 		localPath := filepath.Join(sessionDir, localFilename)
@@ -94,14 +132,14 @@ func (u *Uploader) Upload(repoID, sessionDir string) error {
 	if len(lfsFiles) > 0 {
 		u.logger.Info("Uploading LFS files", "count", len(lfsFiles))
 
-		uploadMap, err := u.PreuploadLFS(repoID, "main", lfsFiles)
+		uploadMap, err := u.PreuploadLFSWithRetry(repoID, "main", lfsFiles, MaxRetries)
 		if err != nil {
 			return fmt.Errorf("failed to preupload LFS: %w", err)
 		}
 
 		for oid, uploadInfo := range uploadMap {
 			localPath := filePaths[oid]
-			if err := u.UploadLFSFile(uploadInfo, localPath); err != nil {
+			if err := u.UploadLFSFileWithRetry(uploadInfo, localPath, MaxRetries); err != nil {
 				return fmt.Errorf("failed to upload LFS file %s: %w", localPath, err)
 			}
 		}
@@ -175,7 +213,11 @@ func (u *Uploader) createRepo(repoID string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -250,8 +292,8 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 	ndjsonPayload := strings.Join(ndjsonLines, "\n")
 
 	// Log preview
-	if len(ndjsonPayload) > 500 {
-		u.logger.Debug("Commit payload (NDJSON)", "preview", ndjsonPayload[:500]+"...")
+	if len(ndjsonPayload) > LogPreviewLength {
+		u.logger.Debug("Commit payload (NDJSON)", "preview", ndjsonPayload[:LogPreviewLength]+"...")
 	} else {
 		u.logger.Debug("Commit payload (NDJSON)", "preview", ndjsonPayload)
 	}
@@ -266,11 +308,15 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 
 	u.logger.Debug("Creating commit", "url", url, "operations", len(operations))
 
-	resp, err := u.httpClient.Do(req)
+	resp, err := u.commitClient.Do(req)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	// Read and log response
 	bodyBytes, _ := io.ReadAll(resp.Body)
@@ -282,4 +328,94 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 	u.logger.Debug("Commit response", "status", resp.StatusCode, "body", string(bodyBytes))
 	u.logger.Info("Commit created successfully", "branch", branch, "operations", len(operations))
 	return nil
+}
+
+// createGitAttributesOperation creates a .gitattributes file operation
+// that configures proper text handling for JSONL files to ensure
+// the HuggingFace viewer renders newlines correctly
+func (u *Uploader) createGitAttributesOperation() (*CommitOperation, error) {
+	// Create .gitattributes content that:
+	// 1. Includes standard HuggingFace LFS patterns
+	// 2. Explicitly EXCLUDES .jsonl files from LFS to keep them as regular text
+	//    This ensures the dataset viewer renders newlines properly
+	content := `*.7z filter=lfs diff=lfs merge=lfs -text
+*.arrow filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs -text
+*.bz2 filter=lfs diff=lfs merge=lfs -text
+*.ckpt filter=lfs diff=lfs merge=lfs -text
+*.ftz filter=lfs diff=lfs merge=lfs -text
+*.gz filter=lfs diff=lfs merge=lfs -text
+*.h5 filter=lfs diff=lfs merge=lfs -text
+*.joblib filter=lfs diff=lfs merge=lfs -text
+*.lfs.* filter=lfs diff=lfs merge=lfs -text
+*.lz4 filter=lfs diff=lfs merge=lfs -text
+*.mds filter=lfs diff=lfs merge=lfs -text
+*.mlmodel filter=lfs diff=lfs merge=lfs -text
+*.model filter=lfs diff=lfs merge=lfs -text
+*.msgpack filter=lfs diff=lfs merge=lfs -text
+*.npy filter=lfs diff=lfs merge=lfs -text
+*.npz filter=lfs diff=lfs merge=lfs -text
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.ot filter=lfs diff=lfs merge=lfs -text
+*.parquet filter=lfs diff=lfs merge=lfs -text
+*.pb filter=lfs diff=lfs merge=lfs -text
+*.pickle filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+*.pt filter=lfs diff=lfs merge=lfs -text
+*.pth filter=lfs diff=lfs merge=lfs -text
+*.rar filter=lfs diff=lfs merge=lfs -text
+*.safetensors filter=lfs diff=lfs merge=lfs -text
+saved_model/**/* filter=lfs diff=lfs merge=lfs -text
+*.tar.* filter=lfs diff=lfs merge=lfs -text
+*.tar filter=lfs diff=lfs merge=lfs -text
+*.tflite filter=lfs diff=lfs merge=lfs -text
+*.tgz filter=lfs diff=lfs merge=lfs -text
+*.wasm filter=lfs diff=lfs merge=lfs -text
+*.xz filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
+*.zst filter=lfs diff=lfs merge=lfs -text
+*tfevents* filter=lfs diff=lfs merge=lfs -text
+# Audio files - uncompressed
+*.pcm filter=lfs diff=lfs merge=lfs -text
+*.sam filter=lfs diff=lfs merge=lfs -text
+*.raw filter=lfs diff=lfs merge=lfs -text
+# Audio files - compressed
+*.aac filter=lfs diff=lfs merge=lfs -text
+*.flac filter=lfs diff=lfs merge=lfs -text
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+*.ogg filter=lfs diff=lfs merge=lfs -text
+*.wav filter=lfs diff=lfs merge=lfs -text
+# Image files - uncompressed
+*.bmp filter=lfs diff=lfs merge=lfs -text
+*.gif filter=lfs diff=lfs merge=lfs -text
+*.png filter=lfs diff=lfs merge=lfs -text
+*.tiff filter=lfs diff=lfs merge=lfs -text
+# Image files - compressed
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.jpeg filter=lfs diff=lfs merge=lfs -text
+*.webp filter=lfs diff=lfs merge=lfs -text
+# Video files - compressed
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.webm filter=lfs diff=lfs merge=lfs -text
+# IMPORTANT: Exclude JSONL files from LFS to ensure proper text rendering
+# JSONL datasets should be treated as regular text files so the HuggingFace
+# viewer can properly render newlines and make the data human-readable
+# *.jsonl is deliberately NOT included in LFS
+`
+
+	// Encode as base64
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+
+	op := &CommitOperation{
+		Operation: "add",
+		Path:      ".gitattributes",
+		Content:   encoded,
+		Encoding:  "base64",
+	}
+
+	u.logger.Info("Created .gitattributes configuration",
+		"excludes_jsonl", true,
+		"reason", "Ensures proper newline rendering in HuggingFace viewer")
+
+	return op, nil
 }

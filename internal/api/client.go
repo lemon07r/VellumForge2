@@ -14,6 +14,19 @@ import (
 	"github.com/lamim/vellumforge2/internal/config"
 )
 
+const (
+	// DefaultHTTPTimeout is the default timeout for HTTP requests
+	DefaultHTTPTimeout = 120 * time.Second
+	// DefaultMaxRetries is the default maximum number of retry attempts
+	DefaultMaxRetries = 3
+	// DefaultBaseRetryDelay is the base delay for exponential backoff
+	DefaultBaseRetryDelay = 2 * time.Second
+	// RateLimitBackoffMultiplier is the multiplier for rate limit backoff (3^n)
+	RateLimitBackoffMultiplier = 3
+	// DefaultMaxBackoffDuration is the default maximum backoff duration
+	DefaultMaxBackoffDuration = 2 * time.Minute
+)
+
 // Client handles HTTP requests to OpenAI-compatible API endpoints
 type Client struct {
 	httpClient      *http.Client
@@ -27,13 +40,18 @@ type Client struct {
 func NewClient(logger *slog.Logger) *Client {
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: DefaultHTTPTimeout,
 		},
 		rateLimiterPool: NewRateLimiterPool(),
 		logger:          logger,
-		maxRetries:      3,
-		baseRetryDelay:  2 * time.Second,
+		maxRetries:      DefaultMaxRetries,
+		baseRetryDelay:  DefaultBaseRetryDelay,
 	}
+}
+
+// SetMaxRetries sets the maximum number of retry attempts
+func (c *Client) SetMaxRetries(maxRetries int) {
+	c.maxRetries = maxRetries
 }
 
 // ChatCompletion sends a chat completion request to the specified model
@@ -61,16 +79,37 @@ func (c *Client) ChatCompletion(
 		N:           1,
 	}
 
+	// Enable JSON mode if configured
+	if modelCfg.UseJSONMode {
+		req.ResponseFormat = &ResponseFormat{Type: "json_object"}
+	}
+
 	// Retry with exponential backoff
+	// Use model-specific maxRetries if configured (default is 3 from loader)
+	// Set to -1 for unlimited retries
 	var lastErr error
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+	maxAttempts := modelCfg.MaxRetries
+	if maxAttempts == 0 {
+		maxAttempts = c.maxRetries // Fallback to client default
+	}
+	
+	for attempt := 0; maxAttempts < 0 || attempt <= maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Calculate backoff with jitter
 			backoff := time.Duration(math.Pow(2, float64(attempt-1))) * c.baseRetryDelay
 
-			// For rate limit errors, use longer delays
+			// For rate limit errors, use longer delays (3^n: 6s, 18s, 54s)
 			if apiErr, ok := lastErr.(*APIError); ok && apiErr.StatusCode == http.StatusTooManyRequests {
-				backoff = time.Duration(math.Pow(3, float64(attempt))) * c.baseRetryDelay // 6s, 18s, 54s
+				backoff = time.Duration(math.Pow(RateLimitBackoffMultiplier, float64(attempt))) * c.baseRetryDelay
+			}
+
+			// Apply configurable backoff cap
+			maxBackoff := DefaultMaxBackoffDuration
+			if modelCfg.MaxBackoffSeconds > 0 {
+				maxBackoff = time.Duration(modelCfg.MaxBackoffSeconds) * time.Second
+			}
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 
 			jitter := time.Duration(float64(backoff) * 0.1 * (2*float64(time.Now().UnixNano()%100)/100 - 1))
@@ -92,6 +131,13 @@ func (c *Client) ChatCompletion(
 
 		resp, err := c.doRequest(ctx, modelCfg.BaseURL, apiKey, req)
 		if err == nil {
+			// Check finish_reason for truncation
+			if len(resp.Choices) > 0 && resp.Choices[0].FinishReason == "length" {
+				c.logger.Warn("Response truncated due to max_tokens limit",
+					"model", modelCfg.ModelName,
+					"max_tokens", modelCfg.MaxOutputTokens,
+					"finish_reason", resp.Choices[0].FinishReason)
+			}
 			return resp, nil
 		}
 
@@ -104,6 +150,28 @@ func (c *Client) ChatCompletion(
 	}
 
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
+// ChatCompletionStructured sends a chat completion request optimized for structured JSON output
+// Uses structure_temperature if set, otherwise falls back to regular temperature
+// Automatically enables JSON mode if configured
+func (c *Client) ChatCompletionStructured(
+	ctx context.Context,
+	modelCfg config.ModelConfig,
+	apiKey string,
+	messages []Message,
+) (*ChatCompletionResponse, error) {
+	// Use structure_temperature if set, otherwise use regular temperature
+	tempCfg := modelCfg
+	if modelCfg.StructureTemperature > 0 {
+		tempCfg.Temperature = modelCfg.StructureTemperature
+		c.logger.Debug("Using structure_temperature for JSON generation",
+			"structure_temp", modelCfg.StructureTemperature,
+			"regular_temp", modelCfg.Temperature)
+	}
+
+	// Call regular ChatCompletion with modified config
+	return c.ChatCompletion(ctx, tempCfg, apiKey, messages)
 }
 
 func (c *Client) doRequest(
@@ -148,7 +216,11 @@ func (c *Client) doRequest(
 			Retryable:  true,
 		}
 	}
-	defer func() { _ = httpResp.Body.Close() }()
+	defer func() {
+		if err := httpResp.Body.Close(); err != nil {
+			c.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	// Read response body
 	respBody, err := io.ReadAll(httpResp.Body)

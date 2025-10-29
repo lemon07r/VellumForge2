@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 )
@@ -41,7 +42,13 @@ func PrepareFileOperation(localPath, pathInRepo string) (*CommitOperation, error
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			// File close errors are critical for data integrity
+			// Log but don't fail since file was already read
+			fmt.Fprintf(os.Stderr, "Warning: failed to close file %s: %v\n", localPath, err)
+		}
+	}()
 
 	// Calculate SHA256
 	hasher := sha256.New()

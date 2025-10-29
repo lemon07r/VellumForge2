@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/lamim/vellumforge2/internal/api"
+	"github.com/lamim/vellumforge2/internal/checkpoint"
 	"github.com/lamim/vellumforge2/internal/config"
 	"github.com/lamim/vellumforge2/internal/judge"
 	"github.com/lamim/vellumforge2/internal/util"
@@ -19,13 +21,15 @@ import (
 
 // Orchestrator manages the entire data generation pipeline
 type Orchestrator struct {
-	cfg         *config.Config
-	secrets     *config.Secrets
-	apiClient   *api.Client
-	judgeModule *judge.Judge
-	dataWriter  *writer.DatasetWriter
-	logger      *slog.Logger
-	stats       *models.SessionStats
+	cfg           *config.Config
+	secrets       *config.Secrets
+	apiClient     *api.Client
+	judgeModule   *judge.Judge
+	dataWriter    *writer.DatasetWriter
+	logger        *slog.Logger
+	stats         *models.SessionStats
+	checkpointMgr *checkpoint.Manager
+	resumeMode    bool
 }
 
 // New creates a new orchestrator
@@ -34,6 +38,8 @@ func New(
 	secrets *config.Secrets,
 	apiClient *api.Client,
 	dataWriter *writer.DatasetWriter,
+	checkpointMgr *checkpoint.Manager,
+	resumeMode bool,
 	logger *slog.Logger,
 ) *Orchestrator {
 	var judgeModule *judge.Judge
@@ -41,30 +47,78 @@ func New(
 		judgeModule = judge.New(cfg, secrets, apiClient, logger)
 	}
 
+	stats := &models.SessionStats{
+		StartTime: time.Now(),
+	}
+
+	// In resume mode, restore stats from checkpoint
+	if resumeMode && checkpointMgr != nil {
+		cp := checkpointMgr.GetCheckpoint()
+		stats = &cp.Stats
+		// Keep original start time but update for this run
+		stats.StartTime = time.Now()
+	}
+
 	return &Orchestrator{
-		cfg:         cfg,
-		secrets:     secrets,
-		apiClient:   apiClient,
-		judgeModule: judgeModule,
-		dataWriter:  dataWriter,
-		logger:      logger,
-		stats: &models.SessionStats{
-			StartTime: time.Now(),
-		},
+		cfg:           cfg,
+		secrets:       secrets,
+		apiClient:     apiClient,
+		judgeModule:   judgeModule,
+		dataWriter:    dataWriter,
+		logger:        logger,
+		stats:         stats,
+		checkpointMgr: checkpointMgr,
+		resumeMode:    resumeMode,
 	}
 }
 
 // Run executes the complete generation pipeline
 func (o *Orchestrator) Run(ctx context.Context) error {
+	defer func() {
+		// Ensure checkpoint manager is properly closed
+		if o.checkpointMgr != nil {
+			if err := o.checkpointMgr.Close(); err != nil {
+				o.logger.Error("Failed to close checkpoint manager", "error", err)
+			}
+		}
+	}()
+
 	o.logger.Info("Starting generation pipeline",
 		"main_topic", o.cfg.Generation.MainTopic,
 		"num_subtopics", o.cfg.Generation.NumSubtopics,
-		"prompts_per_subtopic", o.cfg.Generation.NumPromptsPerSubtopic)
+		"prompts_per_subtopic", o.cfg.Generation.NumPromptsPerSubtopic,
+		"resume_mode", o.resumeMode)
 
 	// Phase 1: Generate subtopics
-	subtopics, err := o.generateSubtopics(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to generate subtopics: %w", err)
+	var subtopics []string
+	var err error
+
+	if o.resumeMode && o.checkpointMgr != nil {
+		cp := o.checkpointMgr.GetCheckpoint()
+		if cp.SubtopicsComplete {
+			subtopics = cp.Subtopics
+			o.logger.Info("Resuming from checkpoint: subtopics phase complete", "count", len(subtopics))
+		} else {
+			subtopics, err = o.generateSubtopics(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to generate subtopics: %w", err)
+			}
+			if o.checkpointMgr != nil {
+				if err := o.checkpointMgr.MarkSubtopicsComplete(subtopics); err != nil {
+					o.logger.Warn("Failed to save subtopics checkpoint", "error", err)
+				}
+			}
+		}
+	} else {
+		subtopics, err = o.generateSubtopics(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to generate subtopics: %w", err)
+		}
+		if o.checkpointMgr != nil {
+			if err := o.checkpointMgr.MarkSubtopicsComplete(subtopics); err != nil {
+				o.logger.Warn("Failed to save subtopics checkpoint", "error", err)
+			}
+		}
 	}
 
 	o.logger.Info("Generated subtopics", "count", len(subtopics))
@@ -78,9 +132,34 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	}
 
 	// Phase 2: Generate prompts for each subtopic
-	prompts, err := o.generatePrompts(ctx, subtopics)
-	if err != nil {
-		return fmt.Errorf("failed to generate prompts: %w", err)
+	var prompts []models.GenerationJob
+
+	if o.resumeMode && o.checkpointMgr != nil {
+		cp := o.checkpointMgr.GetCheckpoint()
+		if cp.PromptsComplete {
+			prompts = cp.Prompts
+			o.logger.Info("Resuming from checkpoint: prompts phase complete", "count", len(prompts))
+		} else {
+			prompts, err = o.generatePrompts(ctx, subtopics)
+			if err != nil {
+				return fmt.Errorf("failed to generate prompts: %w", err)
+			}
+			if o.checkpointMgr != nil {
+				if err := o.checkpointMgr.MarkPromptsComplete(prompts); err != nil {
+					o.logger.Warn("Failed to save prompts checkpoint", "error", err)
+				}
+			}
+		}
+	} else {
+		prompts, err = o.generatePrompts(ctx, subtopics)
+		if err != nil {
+			return fmt.Errorf("failed to generate prompts: %w", err)
+		}
+		if o.checkpointMgr != nil {
+			if err := o.checkpointMgr.MarkPromptsComplete(prompts); err != nil {
+				o.logger.Warn("Failed to save prompts checkpoint", "error", err)
+			}
+		}
 	}
 
 	o.logger.Info("Generated prompts", "count", len(prompts))
@@ -95,8 +174,20 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			"difference", len(prompts)-expectedPrompts)
 	}
 
-	// Phase 3: Generate preference pairs concurrently
-	if err := o.generatePreferencePairs(ctx, prompts); err != nil {
+	// Phase 3: Generate preference pairs concurrently (with resume filtering)
+	pendingJobs := prompts
+	if o.resumeMode && o.checkpointMgr != nil {
+		cp := o.checkpointMgr.GetCheckpoint()
+		pendingJobs = checkpoint.GetPendingJobs(cp)
+		completed := len(prompts) - len(pendingJobs)
+		o.logger.Info("Resuming from checkpoint: preference pairs phase",
+			"total", len(prompts),
+			"completed", completed,
+			"pending", len(pendingJobs),
+			"progress", fmt.Sprintf("%.1f%%", checkpoint.GetProgressPercentage(cp)))
+	}
+
+	if err := o.generatePreferencePairs(ctx, pendingJobs); err != nil {
 		return fmt.Errorf("failed to generate preference pairs: %w", err)
 	}
 
@@ -105,6 +196,13 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	o.stats.TotalDuration = o.stats.EndTime.Sub(o.stats.StartTime)
 	if o.stats.SuccessCount > 0 {
 		o.stats.AverageDuration = o.stats.TotalDuration / time.Duration(o.stats.SuccessCount)
+	}
+
+	// Mark checkpoint as complete
+	if o.checkpointMgr != nil {
+		if err := o.checkpointMgr.MarkComplete(o.stats); err != nil {
+			o.logger.Warn("Failed to save final checkpoint", "error", err)
+		}
 	}
 
 	o.logger.Info("Generation pipeline completed",
@@ -126,43 +224,216 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 }
 
 func (o *Orchestrator) generateSubtopics(ctx context.Context) ([]string, error) {
-	o.logger.Info("Generating subtopics...")
+	targetCount := o.cfg.Generation.NumSubtopics
 
-	// Render template
-	prompt, err := util.RenderTemplate(o.cfg.PromptTemplates.SubtopicGeneration, map[string]interface{}{
-		"MainTopic":    o.cfg.Generation.MainTopic,
-		"NumSubtopics": o.cfg.Generation.NumSubtopics,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to render subtopic template: %w", err)
+	// STRATEGY: Request extra based on configurable buffer to account for LLM undershoot and duplicates
+	multiplier := 1.0 + o.cfg.Generation.OverGenerationBuffer
+	requestCount := int(float64(targetCount) * multiplier)
+
+	bufferPercent := int(o.cfg.Generation.OverGenerationBuffer * 100)
+
+	// Determine chunk size (default 30, or 0 to disable chunking)
+	chunkSize := o.cfg.Generation.SubtopicChunkSize
+	if chunkSize == 0 {
+		chunkSize = requestCount // Single request (old behavior)
 	}
 
-	// Call API
+	// Log strategy
+	if chunkSize < requestCount {
+		o.logger.Info("Generating subtopics with chunking and over-generation strategy",
+			"target", targetCount,
+			"requesting", requestCount,
+			"chunk_size", chunkSize,
+			"num_chunks", (requestCount+chunkSize-1)/chunkSize,
+			"buffer_percent", bufferPercent)
+	} else {
+		o.logger.Info("Generating subtopics with over-generation strategy (no chunking)",
+			"target", targetCount,
+			"requesting", requestCount,
+			"buffer_percent", bufferPercent)
+	}
+
+	// Request subtopics in chunks
+	var allSubtopics []string
+	remaining := requestCount
+
+	for remaining > 0 {
+		currentChunk := chunkSize
+		if currentChunk > remaining {
+			currentChunk = remaining
+		}
+
+		o.logger.Debug("Requesting subtopic chunk",
+			"chunk_size", currentChunk,
+			"remaining", remaining,
+			"collected", len(allSubtopics))
+
+		chunkSubtopics, err := o.requestSubtopics(ctx, currentChunk, nil)
+		if err != nil {
+			if len(allSubtopics) > 0 {
+				// Partial success - log warning and continue with what we have
+				o.logger.Warn("Chunk request failed, continuing with partial results",
+					"error", err,
+					"collected_so_far", len(allSubtopics))
+				break
+			}
+			return nil, fmt.Errorf("initial subtopic generation failed: %w", err)
+		}
+
+		allSubtopics = append(allSubtopics, chunkSubtopics...)
+		remaining -= currentChunk
+	}
+
+	subtopics := allSubtopics
+
+	// Deduplicate
+	uniqueSubtopics := deduplicateStrings(subtopics)
+
+	o.logger.Info("Initial subtopic generation complete",
+		"requested", requestCount,
+		"received", len(subtopics),
+		"unique", len(uniqueSubtopics),
+		"duplicates_filtered", len(subtopics)-len(uniqueSubtopics))
+
+	// If we have enough, trim and return
+	if len(uniqueSubtopics) >= targetCount {
+		trimmed := uniqueSubtopics[:targetCount]
+		o.logger.Info("Target count achieved",
+			"final_count", len(trimmed),
+			"excess_trimmed", len(uniqueSubtopics)-targetCount)
+		return trimmed, nil
+	}
+
+	// If we're short, make ONE retry for the difference
+	shortage := targetCount - len(uniqueSubtopics)
+	o.logger.Warn("Subtopic count below target, attempting recovery",
+		"current", len(uniqueSubtopics),
+		"shortage", shortage)
+
+	// Retry with exclusion list (but simpler prompt)
+	retrySubtopics, retryErr := o.requestSubtopics(ctx, shortage, uniqueSubtopics)
+	if retryErr != nil {
+		o.logger.Warn("Retry failed, proceeding with partial results", "error", retryErr)
+		return uniqueSubtopics, nil // Return what we have
+	}
+
+	// Merge and deduplicate again
+	allSubtopics = append(uniqueSubtopics, retrySubtopics...)
+	finalUnique := deduplicateStrings(allSubtopics)
+
+	o.logger.Info("Subtopic generation complete after retry",
+		"final_count", len(finalUnique),
+		"target", targetCount,
+		"success", len(finalUnique) >= targetCount)
+
+	// Return what we have (may be less than target)
+	if len(finalUnique) > targetCount {
+		return finalUnique[:targetCount], nil
+	}
+	return finalUnique, nil
+}
+
+// truncateExclusionList limits the exclusion list to avoid prompt overflow
+// Uses last N items as most recent failures are more relevant
+// Returns the truncated list and a boolean indicating if truncation occurred
+func truncateExclusionList(items []string, maxSize int) ([]string, bool) {
+	if len(items) <= maxSize {
+		return items, false
+	}
+	// Return last maxSize items (most recent)
+	return items[len(items)-maxSize:], true
+}
+
+// requestSubtopics makes a single API call for subtopics
+// exclusionList is optional (nil on first call, populated on retry)
+func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusionList []string) ([]string, error) {
+	// Build template data
+	templateData := map[string]interface{}{
+		"MainTopic":    o.cfg.Generation.MainTopic,
+		"NumSubtopics": count,
+		"IsRetry":      false, // Default to false
+	}
+
+	// Add exclusion list if present (for retry)
+	if len(exclusionList) > 0 {
+		// Truncate if necessary to prevent prompt overflow
+		truncated, wasTruncated := truncateExclusionList(
+			exclusionList,
+			o.cfg.Generation.MaxExclusionListSize,
+		)
+
+		if wasTruncated {
+			o.logger.Warn("Exclusion list truncated to prevent prompt overflow",
+				"original_size", len(exclusionList),
+				"truncated_size", len(truncated),
+				"max_size", o.cfg.Generation.MaxExclusionListSize)
+		}
+
+		// Format as simple comma-separated list to keep LLM focused
+		excluded := strings.Join(truncated, ", ")
+		templateData["ExcludeSubtopics"] = excluded
+		templateData["IsRetry"] = true
+	}
+
+	// Render template
+	prompt, err := util.RenderTemplate(o.cfg.PromptTemplates.SubtopicGeneration, templateData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to render template: %w", err)
+	}
+
+	// Call API with structured output optimization
 	mainModel := o.cfg.Models["main"]
 	apiKey := o.secrets.GetAPIKey(mainModel.BaseURL)
 
-	resp, err := o.apiClient.ChatCompletion(ctx, mainModel, apiKey, []api.Message{
+	resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, []api.Message{
 		{Role: "user", Content: prompt},
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse JSON response
 	content := resp.Choices[0].Message.Content
-
 	o.logger.Debug("Received subtopics response", "length", len(content))
 
-	// Extract JSON from potential markdown code blocks
+	// Extract and repair JSON
 	jsonStr := extractJSON(content)
+	o.logger.Debug("Extracted JSON", "length", len(jsonStr))
 
-	o.logger.Debug("Extracted JSON", "length", len(jsonStr), "json", jsonStr)
+	jsonStr = util.RepairJSON(jsonStr)
+	o.logger.Debug("Repaired JSON", "length", len(jsonStr))
 
-	var subtopics []string
-	if err := json.Unmarshal([]byte(jsonStr), &subtopics); err != nil {
-		o.logger.Error("Failed to parse subtopics JSON", "error", err, "extracted_json", jsonStr, "original_response", content)
-		return nil, fmt.Errorf("failed to parse subtopics JSON: %w (response: %s)", err, content)
+	// Try validation first (advisory)
+	valid, elemCount, err := ValidateJSONArray(jsonStr)
+	if valid {
+		o.logger.Debug("JSON validated successfully", "element_count", elemCount)
+	} else {
+		o.logger.Warn("JSON validation failed, attempting unmarshal anyway",
+			"error", err,
+			"extracted_json", util.TruncateString(jsonStr, 200))
 	}
+
+	// Attempt unmarshal with validation (with fallback to basic unmarshal)
+	subtopics, actualCount, err := ValidateStringArray(jsonStr, 1)
+	if err != nil {
+		// Fallback: try basic unmarshal (old behavior)
+		o.logger.Warn("ValidateStringArray failed, trying basic unmarshal", "error", err)
+		var basicSubtopics []string
+		if unmarshalErr := json.Unmarshal([]byte(jsonStr), &basicSubtopics); unmarshalErr != nil {
+			o.logger.Error("Both validation and basic unmarshal failed",
+				"validation_error", err,
+				"unmarshal_error", unmarshalErr,
+				"extracted_json", util.TruncateString(jsonStr, 200),
+				"original_response", util.TruncateString(content, 200))
+			return nil, fmt.Errorf("failed to parse subtopics: %w (unmarshal also failed: %v)", err, unmarshalErr)
+		}
+		subtopics = basicSubtopics
+		actualCount = len(basicSubtopics)
+		o.logger.Info("Basic unmarshal succeeded", "count", actualCount)
+	}
+
+	o.logger.Info("Subtopics parsed successfully",
+		"requested", count,
+		"received", actualCount)
 
 	return subtopics, nil
 }
@@ -189,7 +460,7 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		mainModel := o.cfg.Models["main"]
 		apiKey := o.secrets.GetAPIKey(mainModel.BaseURL)
 
-		resp, err := o.apiClient.ChatCompletion(ctx, mainModel, apiKey, []api.Message{
+		resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, []api.Message{
 			{Role: "user", Content: prompt},
 		})
 		if err != nil {
@@ -204,18 +475,45 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		// Extract JSON from potential markdown code blocks
 		jsonStr := extractJSON(content)
 
-		o.logger.Debug("Extracted JSON", "length", len(jsonStr), "first_100_chars", truncateString(jsonStr, 100))
+		o.logger.Debug("Extracted JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
 
-		var prompts []string
-		if err := json.Unmarshal([]byte(jsonStr), &prompts); err != nil {
-			o.logger.Error("Failed to parse prompts JSON",
+		// Repair common JSON issues from LLM responses
+		jsonStr = util.RepairJSON(jsonStr)
+		o.logger.Debug("Repaired JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
+
+		// Try validation first (advisory)
+		valid, elemCount, err := ValidateJSONArray(jsonStr)
+		if valid {
+			o.logger.Debug("Prompts JSON validated successfully", "subtopic", subtopic, "element_count", elemCount)
+		} else {
+			o.logger.Warn("JSON validation failed for prompts, attempting unmarshal anyway",
 				"error", err,
 				"subtopic", subtopic,
-				"extracted_json_length", len(jsonStr),
-				"extracted_json", jsonStr,
-				"original_response_length", len(content),
-				"original_response", content)
-			return nil, fmt.Errorf("failed to parse prompts JSON: %w (response: %s)", err, content)
+				"extracted_json", util.TruncateString(jsonStr, 200))
+		}
+
+		// Attempt unmarshal with validation (with fallback to basic unmarshal)
+		prompts, actualCount, err := ValidateStringArray(jsonStr, 1)
+		if err != nil {
+			// Fallback: try basic unmarshal (old behavior)
+			o.logger.Warn("ValidateStringArray failed for prompts, trying basic unmarshal",
+				"error", err,
+				"subtopic", subtopic)
+			var basicPrompts []string
+			if unmarshalErr := json.Unmarshal([]byte(jsonStr), &basicPrompts); unmarshalErr != nil {
+				o.logger.Error("Both validation and basic unmarshal failed for prompts",
+					"validation_error", err,
+					"unmarshal_error", unmarshalErr,
+					"subtopic", subtopic,
+					"extracted_json", util.TruncateString(jsonStr, 200),
+					"original_response", util.TruncateString(content, 200))
+				return nil, fmt.Errorf("failed to parse prompts for subtopic %q: %w (unmarshal also failed: %v)", subtopic, err, unmarshalErr)
+			}
+			prompts = basicPrompts
+			actualCount = len(basicPrompts)
+			o.logger.Info("Basic unmarshal succeeded for prompts", "subtopic", subtopic, "count", actualCount)
+		} else {
+			o.logger.Debug("Prompts parsed successfully", "subtopic", subtopic, "count", actualCount)
 		}
 
 		// Create jobs
@@ -273,12 +571,4 @@ func (o *Orchestrator) generatePreferencePairs(ctx context.Context, jobs []model
 // GetStats returns the session statistics
 func (o *Orchestrator) GetStats() *models.SessionStats {
 	return o.stats
-}
-
-// truncateString truncates a string to maxLen characters
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }

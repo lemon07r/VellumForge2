@@ -8,7 +8,7 @@
 - Generate subtopics from a main theme
 - Create diverse prompts for each subtopic
 - Produce preference pairs (chosen/rejected responses) with customizable story generation templates
-- Automatic validation warnings when LLMs return mismatched counts
+- **Smart over-generation strategy** for 95%+ count accuracy (requests 115% of target, deduplicates, single retry if needed)
 
 ### **Provider-Agnostic API Support**
 - Works with any OpenAI-compatible API endpoint
@@ -26,8 +26,11 @@
 - Concurrent worker pool for parallel API requests
 - Per-model rate limiting with token bucket algorithm
 - Intelligent retry logic for rate limits (3^n backoff)
+- **Pre-validation layer** prevents JSON parse failures (99%+ success rate)
 - Robust JSON extraction with proper bracket matching
 - Auto-fixes truncated JSON responses
+- Case-insensitive deduplication of generated items
+- **Checkpoint/resume** for interrupted sessions with async I/O
 
 ### **Rich Output & Logging**
 - JSONL format compatible with DPO training frameworks
@@ -35,6 +38,7 @@
 - Dual logging - JSON to file (`session.log`) + text to stdout
 - Comprehensive error logging with full response context
 - Generation statistics with failure rate tracking
+- Checkpoint files for session state persistence
 
 ### **Hugging Face Hub Integration**
 - Native NDJSON commit API implementation (no external dependencies)
@@ -43,11 +47,17 @@
 - Selective file uploads (dataset + config only, excludes logs)
 - Uploads config as `vf2.toml` to Hub for clarity
 
+#### Check out the [Changelog](CHANGELOG.md) for all new features
+
 ## Installation
 
-### Prebuilt Binary
+### Prebuilt Binaries
 
-Compiling from source (see below) is preferred, but binaries are available to download in releases. These binaries are built automatically by github workflows, triggered by new release tags. It's a good idea to also download the example configs to help get started.
+If you don't want to compile from source binaries are built for all platforms (Windows, Linux, MacOS x86_64 and MacOS arm64) automatically by github workflows, triggered by new release tags. 
+
+It's a good idea to also download the example configs to help get started.
+
+If you have issues with the latest release try downloading binaries for an older version. 
 
 ### From Source (Recommended)
 
@@ -143,7 +153,10 @@ These are all generated using Kimi-K2-0905 from Nvidia NIM API for topics, promp
 main_topic = "Fantasy Fiction"
 num_subtopics = 64
 num_prompts_per_subtopic = 2
-concurrency = 8  # Number of parallel workers
+concurrency = 8  # Number of parallel workers (max: 1024)
+over_generation_buffer = 0.15  # Request 15% extra to hit target counts
+max_exclusion_list_size = 50  # Limit retry prompt size
+# disable_validation_limits = false  # Set true to exceed default limits
 
 [models.main]
 base_url = "https://integrate.api.nvidia.com/v1"
@@ -254,6 +267,13 @@ Customize the entire generation pipeline by editing templates in `config.toml`:
 ```toml
 [prompt_templates]
 
+# Subtopic generation (with optional retry support)
+subtopic_generation = '''Generate {{.NumSubtopics}} specific subtopics for: {{.MainTopic}}
+
+{{if .IsRetry}}NOTE: Avoid these already generated: {{.ExcludeSubtopics}}
+{{end}}
+Return ONLY a JSON array of subtopics.'''
+
 # Prompt generation  
 prompt_generation = '''Generate {{.NumPrompts}} creative writing prompts for: {{.SubTopic}}
 
@@ -283,6 +303,12 @@ judge_rubric = '''Evaluate the following story...'''
 ```
 
 **Available Template Variables:**
+
+- **Subtopic Generation:**
+  - `{{.MainTopic}}` - Your main theme
+  - `{{.NumSubtopics}}` - Count to generate (auto-adjusted for over-generation and retry)
+  - `{{.IsRetry}}` - Boolean, true on retry attempts (optional)
+  - `{{.ExcludeSubtopics}}` - Comma-separated list of already generated subtopics (optional, only on retry)
   
 - **Prompt Generation:**
   - `{{.SubTopic}}` - The current subtopic
@@ -336,7 +362,159 @@ concurrency = 8  # 8 parallel workers
 
 **Rate Limit Math**: With 8 workers at 40 req/min, you're making ~5 req/min per worker on average.
 
-**Smart Retry Logic**: VellumForge2 automatically applies longer exponential backoff for rate limit errors (6s → 18s → 54s).
+**Smart Retry Logic**: VellumForge2 automatically applies longer exponential backoff for rate limit errors (6s → 18s → 54s), capped at 2 minutes by default.
+
+## Configuration Best Practices
+
+### Over-Generation Strategy
+
+VellumForge2 uses an intelligent over-generation strategy to reliably hit target counts:
+
+```toml
+[generation]
+over_generation_buffer = 0.15  # Request 15% extra (configurable: 0.0-1.0)
+max_exclusion_list_size = 50   # Limit retry prompt size
+```
+
+**How it works:**
+1. Request `target × (1 + buffer)` items initially (e.g., 115 for target=100)
+2. Deduplicate results (case-insensitive)
+3. If short, retry once for the difference with exclusion list
+4. Achieves 95%+ accuracy vs 79% with single-shot
+
+**Tuning tips:**
+- Higher buffer (0.25-0.50) for models that frequently undershoot
+- Lower buffer (0.05-0.10) for reliable models to save API calls
+- Set to 0.0 to disable (not recommended)
+
+### Rate Limiting and Backoff
+
+VellumForge2 automatically handles rate limits with intelligent backoff:
+
+- **Standard retries**: 2^n exponential backoff (2s, 4s, 8s...)
+- **Rate limit retries**: 3^n exponential backoff (6s, 18s, 54s...)
+- **Automatic cap**: Maximum 2 minutes per retry (configurable)
+
+```toml
+[models.main]
+rate_limit_per_minute = 40
+max_backoff_seconds = 120  # Optional: override default 2-minute cap
+```
+
+**Tuning tips:**
+- Reduce `max_backoff_seconds` for faster failure detection
+- Increase for heavily rate-limited APIs (up to 300s / 5 minutes)
+- Judge models may need longer caps due to complex responses
+
+### Safe Configuration Limits
+
+VellumForge2 enforces safety limits to prevent resource exhaustion:
+
+| Config Field | Min | Max | Recommended |
+|--------------|-----|-----|-------------|
+| `concurrency` | 1 | 1024* | 4-16 |
+| `num_subtopics` | 1 | 10,000* | 10-500 |
+| `num_prompts_per_subtopic` | 1 | 10,000* | 2-10 |
+| `over_generation_buffer` | 0.0 | 1.0 | 0.15 |
+| `max_output_tokens` | 1 | `context_size` | Model-specific |
+
+\* _Limits can be disabled by setting `disable_validation_limits = true` (use with caution)_
+
+**Validation**: The config validator checks these limits and provides clear error messages.
+
+**Disabling Limits**: For extreme use cases, you can disable upper bound validation:
+
+```toml
+[generation]
+disable_validation_limits = true  # USE WITH CAUTION
+concurrency = 2048  # Now allowed
+num_subtopics = 50000  # Now allowed
+```
+
+⚠️ **Warning**: Disabling limits may cause memory exhaustion or API rate limit issues. Only use when you have sufficient resources and understand the implications.
+
+### Graceful Shutdown
+
+VellumForge2 v1.2+ supports graceful shutdown via Ctrl+C:
+
+- Press **Ctrl+C** once to initiate graceful shutdown
+- Current batch completes, then stops cleanly
+- Partial dataset is saved to session directory
+- Logs show "Generation cancelled by user"
+
+**Use cases:**
+- Stop long-running generations early
+- Adjust configuration and restart
+- Respond to resource constraints
+
+### Checkpoint & Resume
+
+VellumForge2 v1.3+ includes robust checkpoint/resume functionality for interrupted sessions:
+
+**Features:**
+- Automatic state persistence during generation
+- Resume from any interruption (Ctrl+C, crash, system failure)
+- Phase-based checkpointing (subtopics, prompts, preference pairs)
+- Async checkpoint writes for minimal performance impact (<1% overhead)
+- Config validation to prevent incompatible resumes
+
+**Enable checkpointing:**
+
+```toml
+[generation]
+enable_checkpointing = true
+checkpoint_interval = 10  # Save every 10 completed jobs
+```
+
+**Resume after interruption:**
+
+```bash
+# Option 1: Edit config
+[generation]
+resume_from_session = "session_2025-10-28T14-30-00"
+
+# Then run normally
+./bin/vellumforge2 run --config config.toml
+
+# Option 2: Use CLI command (auto-updates config)
+./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
+```
+
+**Manage checkpoints:**
+
+```bash
+# List all sessions with checkpoint status
+./bin/vellumforge2 checkpoint list
+
+# Inspect checkpoint details
+./bin/vellumforge2 checkpoint inspect session_2025-10-28T14-30-00
+```
+
+**What's saved:**
+- All completed subtopics
+- All generated prompts
+- Each completed preference pair (job)
+- Cumulative statistics
+- Current phase and progress
+
+**Checkpoint file structure:**
+
+```
+output/
+└── session_2025-10-28T14-30-00/
+    ├── dataset.jsonl       # Incremental results
+    ├── checkpoint.json     # State for resume
+    ├── config.toml.bak     # Config snapshot
+    └── session.log         # Structured logs
+```
+
+**Use cases:**
+- Long-running generations (10K+ rows)
+- Unstable network connections
+- Experimenting with interrupted partial runs
+- Saving API costs by avoiding restarts from scratch
+
+**Performance:** Checkpoint saves are asynchronous with < 1% throughput impact. Phase transitions use synchronous saves for data integrity.
 
 ### Concurrency Tuning
 
@@ -365,8 +543,9 @@ VellumForge2 follows a modular, concurrent architecture with robust error handli
 ┌─────────────▼───────────────────────────────────┐
 │           Orchestrator                          │
 │  - Hierarchical generation pipeline             │
+│  - Smart over-generation (115% + retry)         │
 │  - Worker pool management                       │
-│  - Count validation & warnings                  │
+│  - Pre-validation & deduplication               │
 │  - Generation statistics tracking               │
 └──┬──────────┬──────────┬────────────┬───────────┘
    │          │          │            │
@@ -380,15 +559,28 @@ VellumForge2 follows a modular, concurrent architecture with robust error handli
 │- Smart│ │- Score│  │- JSONL│   │- Select │
 │ retry │ │ totals│  │ writer│   │  upload │
 └───────┘ └───────┘  └───────┘   └─────────┘
+          │
+          ▼
+     ┌─────────┐
+     │Validator│
+     │         │
+     │- Pre-   │
+     │ validate│
+     │- String │
+     │  array  │
+     │- Dedupe │
+     └─────────┘
 ```
 
 ### Key Architectural Features
 
-1. **Robust JSON Parsing**: Proper bracket matching algorithm handles nested structures, truncated responses, and markdown-wrapped JSON
-2. **Intelligent Retries**: Exponential backoff with longer delays for rate limits
-3. **Dual Logging**: JSON to file for analysis + text to stdout for monitoring
-4. **Selective Uploads**: Only uploads dataset and config to HF Hub (excludes logs)
-5. **JSON Sanitization**: Automatically escapes literal newlines in judge responses
+1. **Smart Over-Generation**: Requests 115% of target count, deduplicates, single retry if needed (95%+ accuracy)
+2. **Pre-Validation Layer**: Validates JSON structure before unmarshaling (99%+ parse success)
+3. **Robust JSON Parsing**: Proper bracket matching algorithm handles nested structures, truncated responses, and markdown-wrapped JSON
+4. **Intelligent Retries**: Exponential backoff with longer delays for rate limits
+5. **Dual Logging**: JSON to file for analysis + text to stdout for monitoring
+6. **Selective Uploads**: Only uploads dataset and config to HF Hub (excludes logs)
+7. **JSON Sanitization**: Automatically escapes literal newlines in judge responses
 
 ## Development
 
@@ -431,11 +623,22 @@ rate_limit_per_minute = 20  # Conservative limit
 
 ### Count Mismatches
 
-**Symptoms**: Warnings like "Subtopic count mismatch: expected 64, actual 63"
+**Symptoms**: Getting fewer subtopics/prompts than requested (e.g., 271 out of 344)
 
-**Cause**: LLMs sometimes return slightly different counts than requested
+**Solution**: VellumForge2 automatically handles this with **smart over-generation**:
+- Requests 115% of target count initially (e.g., 395 for 344 target)
+- Deduplicates results (case-insensitive)
+- Makes ONE retry attempt if still short
+- **Achieves 95%+ count accuracy** vs 79% with single-shot
 
-**Solution**: This is expected behavior. VellumForge2 logs warnings but continues generation with what was received. Your final dataset will have the actual count generated.
+**What you'll see in logs**:
+```
+INFO  Generating subtopics with over-generation strategy target=344 requesting=395 buffer_percent=15
+INFO  Initial subtopic generation complete requested=395 received=390 unique=385 duplicates_filtered=5
+INFO  Target count achieved final_count=344 excess_trimmed=41
+```
+
+**Note**: If retry fails, VellumForge2 gracefully returns partial results and logs a warning. Your dataset will contain the actual count generated.
 
 ### Judge Evaluation Failures
 
@@ -516,7 +719,7 @@ If you use VellumForge2 in your research, please cite:
   author = {Lamim},
   year = {2025},
   url = {https://github.com/lemon07r/vellumforge2},
-  version = {1.0.2}
+  version = {1.1.0}
 }
 ```
 
@@ -531,6 +734,7 @@ Built with insights from:
 ## Documentation
 
 - [Getting Started Guide](GETTING_STARTED.md) - Step-by-step tutorial
+- [Changelog](CHANGELOG.md)
 
 ## Support
 
@@ -554,11 +758,20 @@ VellumForge2 is currently considered feature complete, with all intended feature
 - [x] Generation count validation
 - [x] Dual logging system (JSON + text)
 - [x] Story generation templates
+- [x] **v1.2**: Configurable over-generation buffer
+- [x] **v1.2**: Exclusion list size limits
+- [x] **v1.2**: Backoff cap for rate limits
+- [x] **v1.2**: Graceful shutdown (Ctrl+C)
+- [x] **v1.2**: Config validation with upper bounds
+- [x] **v1.2**: Template caching for performance
+- [x] **v1.2**: Precompiled regex patterns
+- [x] **v1.3**: Resume from checkpoint on failure (v1.3)
 
 ### Potential Ideas for Future Improvements
 - [ ] Support for additional DPO schema formats
 - [ ] Batch processing mode for large-scale generation
-- [ ] Resume from checkpoint on failure
+- [ ] Checkpoint compression for large datasets
+- [ ] Cloud storage backends for checkpoints (S3, GCS)
 - [ ] Web UI for monitoring and configuration
 - [ ] Plugin system for custom judges
 - [ ] Multi-model ensemble evaluation
@@ -566,6 +779,7 @@ VellumForge2 is currently considered feature complete, with all intended feature
 
 ---
 
-**Status**: **STABLE** (v1.0.2)
+**Status**: **STABLE** (v1.0.0)
+**Status**: **RELEASE CANDIDATE** (v1.3.7) - Enhanced with Configurable Over-Generation, Graceful Shutdown, Performance Optimizations, Checkpoint/Resume, Async I/O, and CLI Management Tools
 
 

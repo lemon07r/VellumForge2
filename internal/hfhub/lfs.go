@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 )
 
 // LFSPointer represents a pointer to an LFS file
@@ -57,11 +58,15 @@ func (u *Uploader) PreuploadLFS(repoID, branch string, files []LFSPointer) (map[
 
 	u.logger.Debug("Preupload LFS request", "url", url, "file_count", len(files))
 
-	resp, err := u.httpClient.Do(req)
+	resp, err := u.preuploadClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -95,7 +100,11 @@ func (u *Uploader) UploadLFSFile(uploadInfo *LFSUploadInfo, filePath string) err
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			u.logger.Warn("Failed to close file", "file", filePath, "error", err)
+		}
+	}()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
@@ -117,11 +126,15 @@ func (u *Uploader) UploadLFSFile(uploadInfo *LFSUploadInfo, filePath string) err
 
 	u.logger.Debug("Uploading LFS file", "oid", uploadInfo.OID, "size", fileInfo.Size())
 
-	resp, err := u.httpClient.Do(req)
+	resp, err := u.lfsClient.Do(req)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -130,4 +143,73 @@ func (u *Uploader) UploadLFSFile(uploadInfo *LFSUploadInfo, filePath string) err
 
 	u.logger.Info("LFS file uploaded", "oid", uploadInfo.OID, "size", fileInfo.Size())
 	return nil
+}
+
+// PreuploadLFSWithRetry requests presigned URLs with retry logic
+func (u *Uploader) PreuploadLFSWithRetry(repoID, branch string, files []LFSPointer, maxRetries int) (map[string]*LFSUploadInfo, error) {
+	var lastErr error
+	backoff := 2 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			u.logger.Warn("Retrying LFS preupload",
+				"attempt", attempt,
+				"max_retries", maxRetries,
+				"backoff", backoff)
+			time.Sleep(backoff)
+			backoff *= 2 // Exponential backoff
+		}
+
+		result, err := u.PreuploadLFS(repoID, branch, files)
+		if err == nil {
+			if attempt > 0 {
+				u.logger.Info("LFS preupload succeeded after retry", "attempt", attempt)
+			}
+			return result, nil
+		}
+
+		lastErr = err
+		u.logger.Warn("LFS preupload failed",
+			"attempt", attempt,
+			"error", err)
+	}
+
+	return nil, fmt.Errorf("preupload failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
+// UploadLFSFileWithRetry uploads a file with retry logic
+func (u *Uploader) UploadLFSFileWithRetry(uploadInfo *LFSUploadInfo, filePath string, maxRetries int) error {
+	var lastErr error
+	backoff := 2 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			u.logger.Warn("Retrying LFS file upload",
+				"file", filePath,
+				"oid", uploadInfo.OID,
+				"attempt", attempt,
+				"max_retries", maxRetries,
+				"backoff", backoff)
+			time.Sleep(backoff)
+			backoff *= 2 // Exponential backoff
+		}
+
+		err := u.UploadLFSFile(uploadInfo, filePath)
+		if err == nil {
+			if attempt > 0 {
+				u.logger.Info("LFS file upload succeeded after retry",
+					"file", filePath,
+					"attempt", attempt)
+			}
+			return nil
+		}
+
+		lastErr = err
+		u.logger.Warn("LFS file upload failed",
+			"file", filePath,
+			"attempt", attempt,
+			"error", err)
+	}
+
+	return fmt.Errorf("upload failed after %d attempts: %w", maxRetries+1, lastErr)
 }

@@ -59,16 +59,29 @@ func TestRenderTemplate_MissingData(t *testing.T) {
 	tmpl := "Hello {{.Name}}"
 	data := map[string]interface{}{} // Empty data
 
-	result, err := RenderTemplate(tmpl, data)
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
+	_, err := RenderTemplate(tmpl, data)
+	if err == nil {
+		t.Fatal("Expected error for missing key, got nil")
 	}
 
-	// Template should render with empty value
-	expected := "Hello <no value>"
-	if result != expected {
-		t.Errorf("Expected '%s', got '%s'", expected, result)
+	// With "missingkey=error" option, missing keys should cause an error
+	// This is a security feature to prevent silent failures
+	if err != nil && !contains(err.Error(), "map has no entry for key") {
+		t.Errorf("Expected missing key error, got: %v", err)
 	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (findSubstring(s, substr))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRenderTemplate_EmptyTemplate(t *testing.T) {

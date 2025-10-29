@@ -149,6 +149,13 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 				o.stats.FailureCount++
 			} else {
 				o.stats.SuccessCount++
+
+				// Checkpoint progress (interval-based)
+				if o.checkpointMgr != nil {
+					if err := o.checkpointMgr.MarkJobComplete(result.Job.ID, o.stats); err != nil {
+						o.logger.Warn("Failed to checkpoint job", "job_id", result.Job.ID, "error", err)
+					}
+				}
 			}
 		}
 

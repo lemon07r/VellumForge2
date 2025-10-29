@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Config represents the complete application configuration
@@ -15,24 +16,35 @@ type Config struct {
 
 // GenerationConfig holds generation-specific settings
 type GenerationConfig struct {
-	MainTopic             string `toml:"main_topic"`
-	NumSubtopics          int    `toml:"num_subtopics"`
-	NumPromptsPerSubtopic int    `toml:"num_prompts_per_subtopic"`
-	Concurrency           int    `toml:"concurrency"`
+	MainTopic               string  `toml:"main_topic"`
+	NumSubtopics            int     `toml:"num_subtopics"`
+	SubtopicChunkSize       int     `toml:"subtopic_chunk_size"` // Request subtopics in chunks (0=all at once, default: 30)
+	NumPromptsPerSubtopic   int     `toml:"num_prompts_per_subtopic"`
+	Concurrency             int     `toml:"concurrency"`
+	OverGenerationBuffer    float64 `toml:"over_generation_buffer"`    // Buffer percentage (0.0-1.0, default 0.15)
+	MaxExclusionListSize    int     `toml:"max_exclusion_list_size"`   // Max items in exclusion list (default 50)
+	DisableValidationLimits bool    `toml:"disable_validation_limits"` // Disable upper bound validation (use with caution)
+	EnableCheckpointing     bool    `toml:"enable_checkpointing"`      // Enable checkpoint/resume support
+	CheckpointInterval      int     `toml:"checkpoint_interval"`       // Save checkpoint every N completed jobs (default: 10)
+	ResumeFromSession       string  `toml:"resume_from_session"`       // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
 }
 
 // ModelConfig represents configuration for a single model endpoint
 type ModelConfig struct {
-	BaseURL            string  `toml:"base_url"`
-	ModelName          string  `toml:"model_name"`
-	Temperature        float64 `toml:"temperature"`
-	TopP               float64 `toml:"top_p"`
-	TopK               int     `toml:"top_k"`
-	MinP               float64 `toml:"min_p"`
-	MaxOutputTokens    int     `toml:"max_output_tokens"`
-	ContextSize        int     `toml:"context_size"`
-	RateLimitPerMinute int     `toml:"rate_limit_per_minute"`
-	Enabled            bool    `toml:"enabled"` // Only used for judge model
+	BaseURL              string  `toml:"base_url"`
+	ModelName            string  `toml:"model_name"`
+	Temperature          float64 `toml:"temperature"`
+	StructureTemperature float64 `toml:"structure_temperature"` // Temperature for JSON generation (optional, defaults to temperature)
+	TopP                 float64 `toml:"top_p"`
+	TopK                 int     `toml:"top_k"`
+	MinP                 float64 `toml:"min_p"`
+	MaxOutputTokens      int     `toml:"max_output_tokens"`
+	ContextSize          int     `toml:"context_size"`
+	RateLimitPerMinute   int     `toml:"rate_limit_per_minute"`
+	MaxBackoffSeconds    int     `toml:"max_backoff_seconds"` // Optional: max backoff duration (default 120)
+	MaxRetries           int     `toml:"max_retries"`         // Optional: max retry attempts (default 3, 0 = unlimited)
+	UseJSONMode          bool    `toml:"use_json_mode"`       // Enable structured JSON output mode (optional)
+	Enabled              bool    `toml:"enabled"`             // Only used for judge model
 }
 
 // PromptTemplates holds all customizable prompt templates
@@ -55,6 +67,15 @@ type Secrets struct {
 	HuggingFaceToken string
 }
 
+const (
+	// MaxConcurrency is the maximum allowed concurrency
+	MaxConcurrency = 1024
+	// MaxNumSubtopics is the maximum allowed subtopics
+	MaxNumSubtopics = 10000
+	// MaxNumPromptsPerSubtopic is the maximum prompts per subtopic
+	MaxNumPromptsPerSubtopic = 10000
+)
+
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
 	// Validate generation config
@@ -64,11 +85,36 @@ func (c *Config) Validate() error {
 	if c.Generation.NumSubtopics < 1 {
 		return fmt.Errorf("generation.num_subtopics must be at least 1")
 	}
+	// Skip upper bound validation if disabled
+	if !c.Generation.DisableValidationLimits {
+		if c.Generation.NumSubtopics > MaxNumSubtopics {
+			return fmt.Errorf("generation.num_subtopics must not exceed %d (got %d)", MaxNumSubtopics, c.Generation.NumSubtopics)
+		}
+	}
 	if c.Generation.NumPromptsPerSubtopic < 1 {
 		return fmt.Errorf("generation.num_prompts_per_subtopic must be at least 1")
 	}
+	// Skip upper bound validation if disabled
+	if !c.Generation.DisableValidationLimits {
+		if c.Generation.NumPromptsPerSubtopic > MaxNumPromptsPerSubtopic {
+			return fmt.Errorf("generation.num_prompts_per_subtopic must not exceed %d (got %d)", MaxNumPromptsPerSubtopic, c.Generation.NumPromptsPerSubtopic)
+		}
+	}
 	if c.Generation.Concurrency < 1 {
 		return fmt.Errorf("generation.concurrency must be at least 1")
+	}
+	// Skip upper bound validation if disabled
+	if !c.Generation.DisableValidationLimits {
+		if c.Generation.Concurrency > MaxConcurrency {
+			return fmt.Errorf("generation.concurrency must not exceed %d (got %d)", MaxConcurrency, c.Generation.Concurrency)
+		}
+	}
+	if c.Generation.OverGenerationBuffer < 0 || c.Generation.OverGenerationBuffer > 1.0 {
+		return fmt.Errorf("generation.over_generation_buffer must be between 0.0 and 1.0 (got %.2f)", c.Generation.OverGenerationBuffer)
+	}
+	if c.Generation.CheckpointInterval < 1 {
+		// Set default if not specified
+		c.Generation.CheckpointInterval = 10
 	}
 
 	// Validate main model exists
@@ -132,6 +178,9 @@ func validateModelConfig(name string, mc ModelConfig) error {
 	if mc.RateLimitPerMinute < 1 {
 		return fmt.Errorf("models.%s.rate_limit_per_minute must be at least 1", name)
 	}
+	if mc.MaxOutputTokens > mc.ContextSize {
+		return fmt.Errorf("models.%s.max_output_tokens (%d) must not exceed context_size (%d)", name, mc.MaxOutputTokens, mc.ContextSize)
+	}
 	return nil
 }
 
@@ -181,15 +230,7 @@ func (s *Secrets) GetAPIKey(baseURL string) string {
 	return ""
 }
 
+// contains checks if a string contains a substring
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || findInString(s, substr)))
-}
-
-func findInString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }

@@ -6,39 +6,110 @@
 main_topic = "Fantasy Fiction"
 
 # Number of subtopics to generate from the main topic
+# Range: 1-10000 (can be increased with disable_validation_limits)
 num_subtopics = 8
 
+# Subtopic chunk size for JSON generation (default: 30, recommended: 20-50)
+# Requesting subtopics in chunks significantly reduces JSON parsing errors
+# Set to 0 to request all at once (not recommended for large counts)
+# Example: For 100 subtopics with chunk_size=30, makes 4 requests (30+30+30+10)
+subtopic_chunk_size = 30
+
 # Number of prompts to generate per subtopic
+# Range: 1-10000 (can be increased with disable_validation_limits)
 num_prompts_per_subtopic = 4
 
 # Number of concurrent workers for generating preference pairs
 # Recommended: 4-16 depending on API rate limits
+# Range: 1-1024 (can be increased with disable_validation_limits)
 concurrency = 8
+
+# Over-generation buffer for subtopic/prompt generation (0.0-1.0)
+# Default: 0.15 (15% extra requested, then deduplicated and trimmed)
+# This helps achieve target counts despite LLM undershoot and duplicates
+# Set to 0.0 to disable over-generation (not recommended)
+# Example: With buffer=0.15 and num_subtopics=100, requests 115 subtopics
+over_generation_buffer = 0.15
+
+# Maximum exclusion list size for retry prompts
+# Default: 50
+# Limits the number of excluded items passed to LLM in retry attempts
+# to prevent context overflow. Uses most recent failures.
+# Increase for models with larger context windows if needed.
+max_exclusion_list_size = 50
+
+# Disable validation limits (USE WITH CAUTION)
+# Default: false
+# When set to true, disables upper bound validation for concurrency,
+# num_subtopics, and num_prompts_per_subtopic. This allows you to exceed
+# the default safety limits (1024, 10000, 10000 respectively).
+# WARNING: Very high values may cause memory exhaustion or API rate limits.
+# Only enable this if you know what you're doing and have sufficient resources.
+# disable_validation_limits = false
+
+# Enable checkpoint/resume functionality
+# Default: false
+# When enabled, saves checkpoint files during generation allowing you to resume
+# from the last saved state if the process is interrupted (Ctrl+C, crash, etc.)
+enable_checkpointing = true
+
+# Checkpoint interval (jobs)
+# Default: 10
+# Saves checkpoint every N completed preference pairs
+# Lower values = more frequent saves but slightly higher I/O overhead
+# Higher values = less frequent saves but more work lost on interruption
+# Recommended: 10-50 depending on job duration and reliability needs
+checkpoint_interval = 10
+
+# Resume from session (optional)
+# Default: "" (empty = start new session)
+# Set to a session directory name to resume from that checkpoint
+# Example: "session_2025-10-28T14-30-00"
+# You can also use: vellumforge2 checkpoint resume <session-dir>
+# resume_from_session = ""
 
 # Main model configuration (generates "chosen" responses)
 [models.main]
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "moonshotai/kimi-k2-instruct-0905"
-temperature = 0.6
+temperature = 0.6  # For creative content generation
+structure_temperature = 0.2  # For JSON/structured output (optional, lower = more reliable)
 top_p = 1.0
+use_json_mode = false  # Enable if your API supports response_format AND returns unwrapped arrays
+                       # NOTE: Some models (kimi-k2) wrap arrays in objects {"key":[...]} which breaks parsing
+                       # Recommendation: Use concrete prompt examples instead (see prompt_templates)
 top_k = -1  # -1 disables top_k
 min_p = 0.0  # 0.0 disables min_p
 max_output_tokens = 16384
-context_size = 16384
+context_size = 262144
 rate_limit_per_minute = 20
+
+# Optional: Maximum backoff duration in seconds for rate limit retries
+# Default: 120 (2 minutes)
+# Prevents indefinite waits in pathological rate limit scenarios
+# The backoff for rate limits uses 3^n (6s, 18s, 54s, ...) up to this cap
+# max_backoff_seconds = 120
+
+# Optional: Maximum retry attempts for API requests
+# Default: 3
+# Increase for infrastructure issues (e.g., 10-20 for local server timeouts)
+# Set to -1 for unlimited retries (use with caution - can cause infinite loops)
+# max_retries = 3
 
 # Rejected model configuration (generates "rejected" responses)
 # Strategy: Use a weaker model, higher temperature, or non-instruct model
 [models.rejected]
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "meta/llama-3.1-8b-instruct"
-temperature = 0.8 
+temperature = 0.8
 top_p = 1.0
 top_k = -1
 min_p = 0.0
 max_output_tokens = 16384
 context_size = 16384
 rate_limit_per_minute = 20
+# max_backoff_seconds = 120  # Optional: override default backoff cap
+# max_retries = 3  # Optional: override default retry attempts (3 = default, 10-20 for local servers, -1 = unlimited)
 
 # Judge model configuration (optional LLM-as-a-Judge evaluation)
 [models.judge]
@@ -52,32 +123,53 @@ min_p = 0.0
 max_output_tokens = 16384
 context_size = 262144
 rate_limit_per_minute = 20
+# max_backoff_seconds = 180  # Optional: judges may need longer retries (3 minutes)
 
 # Prompt templates (customize for your domain)
+# Available template variables per template:
+#   subtopic_generation: {{.MainTopic}}, {{.NumSubtopics}}, {{.IsRetry}}, {{.ExcludeSubtopics}}
+#   prompt_generation: {{.SubTopic}}, {{.NumPrompts}}, {{.MainTopic}}
+#   chosen_generation: {{.Prompt}}, {{.MainTopic}}, {{.SubTopic}}
+#   rejected_generation: {{.Prompt}}, {{.MainTopic}}, {{.SubTopic}}
+#   judge_rubric: {{.Prompt}}, {{.StoryText}}
 [prompt_templates]
 subtopic_generation = '''You are a creative writing expert specializing in fantasy fiction. Your task is to generate {{.NumSubtopics}} distinct and imaginative subtopics for the main theme: "{{.MainTopic}}".
 
+{{if .IsRetry}}NOTE: Avoid these already generated: {{.ExcludeSubtopics}}
+{{end}}
 Each subtopic should be:
 - Specific and focused enough to inspire detailed story prompts
 - Unique from the others in the list
 - Rich with potential for creative exploration
 - Grounded in the fantasy genre
 
-Return ONLY a valid JSON array of strings (no markdown, no additional text):
-["Subtopic 1", "Subtopic 2", ...]'''
+Return ONLY a valid JSON array of strings. Example format:
+[
+  "A library where overdue books age the borrower",
+  "Ancient dragons awakening in corporate boardrooms",
+  "Time-traveling archaeologists disrupting history"
+]
+
+Now generate {{.NumSubtopics}} unique subtopics (JSON array only, no markdown):'''
 
 prompt_generation = '''You are a creative writing prompt generator specializing in fantasy fiction. Generate {{.NumPrompts}} unique and compelling story prompts for the subtopic: "{{.SubTopic}}".
 
 Each prompt should:
-- Be detailed enough to inspire a complete short story (2-4 sentences)
+- Be detailed enough to inspire a complete short story (2-3 sentences)
 - Include specific characters, settings, or situations
 - Have inherent conflict or tension
 - Be suitable for fantasy fiction writing
 - Be distinct from the other prompts
 - Occasionally contain some sensitive, mature or NSFW themes
 
-Return ONLY a valid JSON array of strings (no markdown, no additional text):
-["Prompt 1", "Prompt 2", ...]'''
+Return ONLY a valid JSON array of strings. Example format:
+[
+  "A young librarian discovers that returning books late causes her to age rapidly. With only days until her 90th birthday despite being 25, she must find the ancient tome that reverses the curse.",
+  "The head archivist secretly keeps forbidden books that grant immortality. When a desperate scholar breaks in to steal one, they accidentally release a curse that begins aging everyone in the city.",
+  "In a world where books are living creatures, an overdue romance novel has been stalking its borrower for months, growing more obsessive with each passing day."
+]
+
+Now generate {{.NumPrompts}} unique prompts for "{{.SubTopic}}" (JSON array only, no markdown):'''
 
 chosen_generation = '''You are a talented fantasy fiction writer. Write a compelling short story (400-600 words) based on the following prompt:
 

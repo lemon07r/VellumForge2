@@ -44,6 +44,12 @@ func applyDefaults(cfg *Config) {
 	if cfg.Generation.Concurrency == 0 {
 		cfg.Generation.Concurrency = 8
 	}
+	if cfg.Generation.OverGenerationBuffer == 0 {
+		cfg.Generation.OverGenerationBuffer = 0.15 // 15% buffer by default
+	}
+	if cfg.Generation.MaxExclusionListSize == 0 {
+		cfg.Generation.MaxExclusionListSize = 50
+	}
 
 	// Apply defaults for each model
 	for name, model := range cfg.Models {
@@ -68,7 +74,24 @@ func applyDefaults(cfg *Config) {
 		if model.RateLimitPerMinute == 0 {
 			model.RateLimitPerMinute = 60
 		}
+		if model.MaxBackoffSeconds == 0 {
+			model.MaxBackoffSeconds = 120 // 2 minutes default
+		}
+		// Default max_retries is 3
+		// NOTE: In TOML, we can't distinguish 0 from unset, so:
+		// - Unset (0) → defaults to 3
+		// - Explicitly set to -1 → unlimited retries
+		// - Any positive number → use that value
+		if model.MaxRetries == 0 {
+			model.MaxRetries = 3 // Default to 3 retries
+		}
+		// If structure_temperature not set, it will use regular temperature (0 = unset)
 		cfg.Models[name] = model
+	}
+
+	// Apply default for subtopic chunk size
+	if cfg.Generation.SubtopicChunkSize == 0 {
+		cfg.Generation.SubtopicChunkSize = 30 // Default chunk size
 	}
 
 	// Apply default templates if not provided
