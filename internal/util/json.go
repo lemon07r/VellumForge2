@@ -97,8 +97,27 @@ func findMatchingBracket(s string, startPos int, openChar, closeChar rune) int {
 }
 
 // SanitizeJSON fixes common JSON issues from LLM responses
-// Specifically handles unescaped newlines in string values
+// Specifically handles:
+// - Unescaped newlines in string values
+// - Single quotes instead of double quotes for property values
 func SanitizeJSON(s string) string {
+	// First pass: Fix single-quoted values (e.g., "key": 'value with "quotes"')
+	// This pattern matches: "key": 'value...' and converts to: "key": "value..."
+	singleQuotePattern := regexp.MustCompile(`"([^"]+)":\s*'([^']*)'`)
+	s = singleQuotePattern.ReplaceAllStringFunc(s, func(match string) string {
+		// Extract the key and value
+		parts := singleQuotePattern.FindStringSubmatch(match)
+		if len(parts) == 3 {
+			key := parts[1]
+			value := parts[2]
+			// Escape any double quotes in the value
+			value = strings.ReplaceAll(value, `"`, `\"`)
+			return `"` + key + `": "` + value + `"`
+		}
+		return match
+	})
+
+	// Second pass: Handle unescaped newlines and other issues
 	var result strings.Builder
 	inString := false
 	escaped := false

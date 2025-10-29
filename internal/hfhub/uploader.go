@@ -14,17 +14,28 @@ import (
 )
 
 const (
-	// DefaultUploadTimeout is the default timeout for upload operations
-	DefaultUploadTimeout = 120 * time.Second
+	// DefaultTimeout is the default timeout for general API operations
+	DefaultTimeout = 300 * time.Second
+	// PreuploadTimeout is the timeout for LFS preupload requests
+	PreuploadTimeout = 300 * time.Second
+	// LFSUploadTimeout is the timeout for actual LFS file uploads
+	LFSUploadTimeout = 600 * time.Second
+	// CommitTimeout is the timeout for commit operations
+	CommitTimeout = 300 * time.Second
 	// LogPreviewLength is the maximum length for log previews
 	LogPreviewLength = 500
+	// MaxRetries is the maximum number of retries for failed operations
+	MaxRetries = 3
 )
 
 // Uploader handles uploading datasets to Hugging Face Hub
 type Uploader struct {
-	token      string
-	httpClient *http.Client
-	logger     *slog.Logger
+	token           string
+	httpClient      *http.Client      // For general operations
+	preuploadClient *http.Client      // For LFS preupload
+	lfsClient       *http.Client      // For LFS file uploads
+	commitClient    *http.Client      // For commit operations
+	logger          *slog.Logger
 }
 
 // NewUploader creates a new Hugging Face Hub uploader
@@ -32,7 +43,16 @@ func NewUploader(token string, logger *slog.Logger) *Uploader {
 	return &Uploader{
 		token: token,
 		httpClient: &http.Client{
-			Timeout: DefaultUploadTimeout,
+			Timeout: DefaultTimeout,
+		},
+		preuploadClient: &http.Client{
+			Timeout: PreuploadTimeout,
+		},
+		lfsClient: &http.Client{
+			Timeout: LFSUploadTimeout,
+		},
+		commitClient: &http.Client{
+			Timeout: CommitTimeout,
 		},
 		logger: logger.With("component", "hf_uploader"),
 	}
@@ -101,14 +121,14 @@ func (u *Uploader) Upload(repoID, sessionDir string) error {
 	if len(lfsFiles) > 0 {
 		u.logger.Info("Uploading LFS files", "count", len(lfsFiles))
 
-		uploadMap, err := u.PreuploadLFS(repoID, "main", lfsFiles)
+		uploadMap, err := u.PreuploadLFSWithRetry(repoID, "main", lfsFiles, MaxRetries)
 		if err != nil {
 			return fmt.Errorf("failed to preupload LFS: %w", err)
 		}
 
 		for oid, uploadInfo := range uploadMap {
 			localPath := filePaths[oid]
-			if err := u.UploadLFSFile(uploadInfo, localPath); err != nil {
+			if err := u.UploadLFSFileWithRetry(uploadInfo, localPath, MaxRetries); err != nil {
 				return fmt.Errorf("failed to upload LFS file %s: %w", localPath, err)
 			}
 		}
@@ -277,7 +297,7 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 
 	u.logger.Debug("Creating commit", "url", url, "operations", len(operations))
 
-	resp, err := u.httpClient.Do(req)
+	resp, err := u.commitClient.Do(req)
 	if err != nil {
 		return err
 	}

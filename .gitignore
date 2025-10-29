@@ -49,3 +49,10 @@ REPORTS/
 
 # Old .git files
 old.git.backup/
+
+# pampax
+.pampa/
+pampa*
+
+# Agents
+AGENTS.md
