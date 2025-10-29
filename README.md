@@ -47,11 +47,17 @@
 - Selective file uploads (dataset + config only, excludes logs)
 - Uploads config as `vf2.toml` to Hub for clarity
 
+#### Check out the [Changelog](CHANGELOG.md) for all new features
+
 ## Installation
 
-### Prebuilt Binary
+### Prebuilt Binaries
 
-Compiling from source (see below) is preferred, but binaries are available to download in releases. These binaries are built automatically by github workflows, triggered by new release tags. It's a good idea to also download the example configs to help get started.
+If you don't want to compile from source binaries are built for all platforms (Windows, Linux, MacOS x86_64 and MacOS arm64) automatically by github workflows, triggered by new release tags. 
+
+It's a good idea to also download the example configs to help get started.
+
+If you have issues with the latest release try downloading binaries for an older version. 
 
 ### From Source (Recommended)
 
@@ -728,6 +734,7 @@ Built with insights from:
 ## Documentation
 
 - [Getting Started Guide](GETTING_STARTED.md) - Step-by-step tutorial
+- [Changelog](CHANGELOG.md)
 
 ## Support
 
@@ -772,7 +779,7 @@ VellumForge2 is currently considered feature complete, with all intended feature
 
 ---
 
-**Status**: **BETA** (v1.2.0) - Enhanced with Configurable Over-Generation, Graceful Shutdown, and Performance Optimizations
-**Status**: **EXPERIMENTAL** (v1.3.0) - Enhanced with Checkpoint/Resume, Async I/O, and CLI Management Tools
+**Status**: **STABLE** (v1.0.0)
+**Status**: **RELEASE CANDIDATE** (v1.3.7) - Enhanced with Configurable Over-Generation, Graceful Shutdown, Performance Optimizations, Checkpoint/Resume, Async I/O, and CLI Management Tools
 
 
