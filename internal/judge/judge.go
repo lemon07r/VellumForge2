@@ -123,7 +123,7 @@ func (j *Judge) parseJudgeResponse(response string) (map[string]models.CriteriaS
 
 func calculateAverageScore(scores map[string]models.CriteriaScore) float64 {
 	if len(scores) == 0 {
-		return 0
+		return 0.0
 	}
 
 	sum := 0
