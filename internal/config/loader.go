@@ -77,6 +77,14 @@ func applyDefaults(cfg *Config) {
 		if model.MaxBackoffSeconds == 0 {
 			model.MaxBackoffSeconds = 120 // 2 minutes default
 		}
+		// Default max_retries is 3
+		// NOTE: In TOML, we can't distinguish 0 from unset, so:
+		// - Unset (0) → defaults to 3
+		// - Explicitly set to -1 → unlimited retries
+		// - Any positive number → use that value
+		if model.MaxRetries == 0 {
+			model.MaxRetries = 3 // Default to 3 retries
+		}
 		// If structure_temperature not set, it will use regular temperature (0 = unset)
 		cfg.Models[name] = model
 	}

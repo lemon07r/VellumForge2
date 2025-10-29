@@ -90,6 +90,12 @@ rate_limit_per_minute = 20
 # The backoff for rate limits uses 3^n (6s, 18s, 54s, ...) up to this cap
 # max_backoff_seconds = 120
 
+# Optional: Maximum retry attempts for API requests
+# Default: 3
+# Increase for infrastructure issues (e.g., 10-20 for local server timeouts)
+# Set to -1 for unlimited retries (use with caution - can cause infinite loops)
+# max_retries = 3
+
 # Rejected model configuration (generates "rejected" responses)
 # Strategy: Use a weaker model, higher temperature, or non-instruct model
 [models.rejected]
@@ -103,6 +109,7 @@ max_output_tokens = 16384
 context_size = 16384
 rate_limit_per_minute = 20
 # max_backoff_seconds = 120  # Optional: override default backoff cap
+# max_retries = 3  # Optional: override default retry attempts (3 = default, 10-20 for local servers, -1 = unlimited)
 
 # Judge model configuration (optional LLM-as-a-Judge evaluation)
 [models.judge]

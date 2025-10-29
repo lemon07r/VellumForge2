@@ -42,6 +42,7 @@ type ModelConfig struct {
 	ContextSize          int     `toml:"context_size"`
 	RateLimitPerMinute   int     `toml:"rate_limit_per_minute"`
 	MaxBackoffSeconds    int     `toml:"max_backoff_seconds"` // Optional: max backoff duration (default 120)
+	MaxRetries           int     `toml:"max_retries"`         // Optional: max retry attempts (default 3, 0 = unlimited)
 	UseJSONMode          bool    `toml:"use_json_mode"`       // Enable structured JSON output mode (optional)
 	Enabled              bool    `toml:"enabled"`             // Only used for judge model
 }

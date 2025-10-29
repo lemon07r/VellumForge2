@@ -49,6 +49,11 @@ func NewClient(logger *slog.Logger) *Client {
 	}
 }
 
+// SetMaxRetries sets the maximum number of retry attempts
+func (c *Client) SetMaxRetries(maxRetries int) {
+	c.maxRetries = maxRetries
+}
+
 // ChatCompletion sends a chat completion request to the specified model
 func (c *Client) ChatCompletion(
 	ctx context.Context,
@@ -80,8 +85,15 @@ func (c *Client) ChatCompletion(
 	}
 
 	// Retry with exponential backoff
+	// Use model-specific maxRetries if configured (default is 3 from loader)
+	// Set to -1 for unlimited retries
 	var lastErr error
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+	maxAttempts := modelCfg.MaxRetries
+	if maxAttempts == 0 {
+		maxAttempts = c.maxRetries // Fallback to client default
+	}
+	
+	for attempt := 0; maxAttempts < 0 || attempt <= maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Calculate backoff with jitter
 			backoff := time.Duration(math.Pow(2, float64(attempt-1))) * c.baseRetryDelay
