@@ -190,7 +190,12 @@ func LoadSecrets() (*Secrets, error) {
 		APIKeys: make(map[string]string),
 	}
 
-	// Load common API keys
+	// Load generic API key (provider-agnostic)
+	if key := os.Getenv("API_KEY"); key != "" {
+		secrets.APIKeys["generic"] = key
+	}
+
+	// Load provider-specific API keys (optional, override generic)
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		secrets.APIKeys["openai"] = key
 	}
@@ -212,21 +217,34 @@ func LoadSecrets() (*Secrets, error) {
 
 // GetAPIKey returns the API key for a given base URL
 func (s *Secrets) GetAPIKey(baseURL string) string {
-	// Try to match common provider domains
+	// Try to match common provider domains (provider-specific keys)
 	if contains(baseURL, "openai.com") {
-		return s.APIKeys["openai"]
+		if key := s.APIKeys["openai"]; key != "" {
+			return key
+		}
 	}
 	if contains(baseURL, "nvidia.com") {
-		return s.APIKeys["nvidia"]
+		if key := s.APIKeys["nvidia"]; key != "" {
+			return key
+		}
 	}
 	if contains(baseURL, "anthropic.com") {
-		return s.APIKeys["anthropic"]
+		if key := s.APIKeys["anthropic"]; key != "" {
+			return key
+		}
 	}
 	if contains(baseURL, "together.xyz") || contains(baseURL, "together.ai") {
-		return s.APIKeys["together"]
+		if key := s.APIKeys["together"]; key != "" {
+			return key
+		}
 	}
 
-	// If no match, return empty (could be local server)
+	// Fall back to generic API_KEY for any OpenAI-compatible provider
+	if key := s.APIKeys["generic"]; key != "" {
+		return key
+	}
+
+	// If no key found, return empty (could be local server without auth)
 	return ""
 }
 

@@ -46,10 +46,16 @@ func (p *RateLimiterPool) GetOrCreate(modelID string, requestsPerMinute int) *ra
 
 	// Create new limiter: convert requests per minute to requests per second
 	rps := float64(requestsPerMinute) / 60.0
-	burst := max(1, requestsPerMinute/10) // Allow some burst capacity
+	burst := max(5, requestsPerMinute/5) // Allow 20% burst capacity (increased from 10%)
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 	p.limiters[modelID] = limiter
 	p.rates[modelID] = requestsPerMinute
+
+	slog.Debug("Created rate limiter",
+		"model_id", modelID,
+		"rpm", requestsPerMinute,
+		"rps", rps,
+		"burst", burst)
 
 	return limiter
 }
