@@ -38,7 +38,7 @@ if [ ! -f "$BINARY" ] || [ "$PROJECT_DIR/cmd/vellumforge2/main.go" -nt "$BINARY"
 fi
 
 update_worker_count() {
-    sed -i "s/^concurrency = [0-9]\+/concurrency = $1/" "$CONFIG_FILE"
+    sed -i "s/^concurrency = [0-9][0-9]*/concurrency = $1/" "$CONFIG_FILE"
 }
 
 # Results CSV
@@ -104,7 +104,7 @@ else:
     
     if [ $? -eq 0 ]; then
         IFS=',' read -r duration throughput avg_total rate_wait blocking <<< "$METRICS"
-        duration_min=$(python3 -c "print(f'{$duration/60:.2f}')")
+        duration_min=$(printf "%.2f" "$(echo "$duration / 60" | bc -l)")
         
         echo "  Duration: ${duration_min} min | Throughput: ${throughput} jobs/min | Rate Wait: ${rate_wait}ms"
         

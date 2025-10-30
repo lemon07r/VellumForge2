@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,6 +12,11 @@ import (
 	"github.com/lamim/vellumforge2/internal/util"
 	"github.com/lamim/vellumforge2/pkg/models"
 	"github.com/schollz/progressbar/v3"
+)
+
+var (
+	// ErrJudgeTimeout indicates that judge evaluation exceeded timeout
+	ErrJudgeTimeout = errors.New("judge evaluation timeout")
 )
 
 func (o *Orchestrator) worker(
@@ -33,9 +39,46 @@ func (o *Orchestrator) worker(
 		default:
 		}
 
-		startTime := time.Now()
-		result := o.processJob(ctx, workerLogger, job)
-		result.Duration = time.Since(startTime)
+		// Determine max retries for judge timeout
+		maxRetries := 0
+		if o.judgeModule != nil {
+			judgeModel := o.cfg.Models["judge"]
+			maxRetries = judgeModel.MaxRetries
+			if maxRetries == 0 {
+				maxRetries = 3 // fallback default
+			}
+		}
+
+		// Retry loop for judge timeouts
+		var result models.GenerationResult
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			if attempt > 0 {
+				workerLogger.Warn("Retrying job due to judge timeout",
+					"job_id", job.ID,
+					"attempt", attempt,
+					"max_retries", maxRetries)
+			}
+
+			startTime := time.Now()
+			result = o.processJob(ctx, workerLogger, job, attempt)
+			result.Duration = time.Since(startTime)
+
+			// Success or non-timeout error - don't retry
+			if result.Error == nil || !errors.Is(result.Error, ErrJudgeTimeout) {
+				break
+			}
+
+			// Judge timeout - retry if attempts remain
+			if attempt < maxRetries {
+				continue
+			}
+
+			// All retries exhausted
+			workerLogger.Error("Job failed after all retries",
+				"job_id", job.ID,
+				"attempts", attempt+1,
+				"error", "judge consistently timed out")
+		}
 
 		results <- result
 	}
@@ -47,6 +90,7 @@ func (o *Orchestrator) processJob(
 	ctx context.Context,
 	logger *slog.Logger,
 	job models.GenerationJob,
+	attempt int,
 ) models.GenerationResult {
 	jobStartTime := time.Now()
 	result := models.GenerationResult{
@@ -101,39 +145,57 @@ func (o *Orchestrator) processJob(
 	result.Rejected = rejectedResp.Choices[0].Message.Content
 	rejectedDuration := time.Since(rejectedStart)
 
-	// Optional: Run judge evaluation asynchronously
+	// Run judge evaluation with timeout and cancellation
+	// When judge is enabled, we MUST get results for dataset consistency
 	var judgeDuration time.Duration
 	if o.judgeModule != nil {
 		judgeStart := time.Now()
 
-		// Create a channel to receive judge result
+		// Create cancellable context for judge API call
+		judgeCtx, cancelJudge := context.WithCancel(ctx)
+		defer cancelJudge() // Ensure cleanup
+
 		judgeDone := make(chan *models.JudgeResult, 1)
 
-		// Launch judge evaluation in background
+		// Launch judge evaluation with cancellable context
 		go func() {
-			judgeResult, err := o.judgeModule.Evaluate(ctx, job.Prompt, result.Chosen, result.Rejected)
+			judgeResult, err := o.judgeModule.Evaluate(judgeCtx, job.Prompt, result.Chosen, result.Rejected)
 			if err != nil {
-				logger.Warn("Judge evaluation failed",
-					"job_id", job.ID,
-					"error", err)
+				// Don't log if cancelled (expected on timeout)
+				if judgeCtx.Err() != context.Canceled {
+					logger.Warn("Judge evaluation failed",
+						"job_id", job.ID,
+						"error", err)
+				}
 				judgeDone <- nil
 			} else {
 				judgeDone <- judgeResult
 			}
 		}()
 
-		// Wait for judge result with timeout or return immediately
+		// Wait for judge with 100ms timeout
 		select {
 		case judgeResult := <-judgeDone:
 			judgeDuration = time.Since(judgeStart)
+			if judgeResult == nil {
+				// Judge returned error - fail the job
+				result.Error = fmt.Errorf("judge evaluation failed")
+				return result
+			}
 			result.JudgeResult = judgeResult
+			logger.Debug("Judge completed",
+				"job_id", job.ID,
+				"duration_ms", judgeDuration.Milliseconds())
 		case <-time.After(100 * time.Millisecond):
-			// Don't block worker - judge will complete in background
-			// Mark as incomplete so we know it's async
-			logger.Debug("Judge evaluation running async",
-				"job_id", job.ID)
+			// Timeout - cancel HTTP request and return timeout error for retry
+			cancelJudge()
 			judgeDuration = time.Since(judgeStart)
-			// Continue without judge result
+			logger.Debug("Judge timeout - will retry job",
+				"job_id", job.ID,
+				"attempt", attempt,
+				"waited_ms", judgeDuration.Milliseconds())
+			result.Error = fmt.Errorf("%w: exceeded 100ms", ErrJudgeTimeout)
+			return result
 		}
 	}
 

@@ -50,7 +50,9 @@ func (p *RateLimiterPool) GetOrCreate(modelID string, requestsPerMinute int) *ra
 
 	// Create new limiter: convert requests per minute to requests per second
 	rps := float64(requestsPerMinute) / 60.0
-	burst := max(5, requestsPerMinute/5) // Allow 20% burst capacity (increased from 10%)
+	// Fixed 20% burst capacity for model-level limiter (hardcoded, not configurable)
+	// Note: Provider-level limiters use configurable burst via provider_burst_percent (default 15%)
+	burst := max(5, requestsPerMinute/5)
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 	p.limiters[modelID] = limiter
 	p.rates[modelID] = requestsPerMinute

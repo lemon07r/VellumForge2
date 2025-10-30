@@ -47,7 +47,7 @@ fi
 update_worker_count() {
     local count=$1
     # Use sed to update concurrency value
-    sed -i "s/^concurrency = [0-9]\+/concurrency = $count/" "$CONFIG_FILE"
+    sed -i "s/^concurrency = [0-9][0-9]*/concurrency = $count/" "$CONFIG_FILE"
     echo -e "${GREEN}✓${NC} Updated config: concurrency = $count"
 }
 
@@ -220,7 +220,7 @@ BEST_WORKERS=0
 for result in "${RESULTS[@]}"; do
     IFS='|' read -r workers duration throughput avg_total rate_wait blocking session <<< "$result"
     
-    duration_min=$(python3 -c "print(f'{$duration/60:.2f}')")
+    duration_min=$(printf "%.2f" "$(echo "$duration/60" | bc -l)")
     
     printf "%-10s %-15s %-18s %-18s %-18s %-15s\n" \
         "$workers" "$duration_min" "$throughput" "$avg_total" "$rate_wait" "$blocking"
