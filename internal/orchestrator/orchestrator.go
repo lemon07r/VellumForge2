@@ -74,11 +74,23 @@ func New(
 
 // Run executes the complete generation pipeline
 func (o *Orchestrator) Run(ctx context.Context) error {
+	var checkpointCloseErr error
+
 	defer func() {
 		// Ensure checkpoint manager is properly closed
 		if o.checkpointMgr != nil {
+			// First, try to save final checkpoint synchronously
+			if err := o.checkpointMgr.SaveSync(); err != nil {
+				o.logger.Error("Failed to save final checkpoint", "error", err)
+				checkpointCloseErr = err
+			}
+
+			// Then close the manager
 			if err := o.checkpointMgr.Close(); err != nil {
 				o.logger.Error("Failed to close checkpoint manager", "error", err)
+				if checkpointCloseErr == nil {
+					checkpointCloseErr = err
+				}
 			}
 		}
 	}()
@@ -218,6 +230,11 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		o.logger.Warn("Generation completed with failures",
 			"failure_rate", fmt.Sprintf("%.2f%%", failureRate),
 			"lost_rows", o.stats.FailureCount)
+	}
+
+	// Check for checkpoint save/close errors before returning
+	if checkpointCloseErr != nil {
+		return fmt.Errorf("checkpoint save failed during shutdown: %w", checkpointCloseErr)
 	}
 
 	return nil
