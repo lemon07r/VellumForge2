@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -12,11 +11,6 @@ import (
 	"github.com/lamim/vellumforge2/internal/util"
 	"github.com/lamim/vellumforge2/pkg/models"
 	"github.com/schollz/progressbar/v3"
-)
-
-var (
-	// ErrJudgeTimeout indicates that judge evaluation exceeded timeout
-	ErrJudgeTimeout = errors.New("judge evaluation timeout")
 )
 
 func (o *Orchestrator) worker(
@@ -39,46 +33,10 @@ func (o *Orchestrator) worker(
 		default:
 		}
 
-		// Determine max retries for judge timeout
-		maxRetries := 0
-		if o.judgeModule != nil {
-			judgeModel := o.cfg.Models["judge"]
-			maxRetries = judgeModel.MaxRetries
-			if maxRetries == 0 {
-				maxRetries = 3 // fallback default
-			}
-		}
-
-		// Retry loop for judge timeouts
-		var result models.GenerationResult
-		for attempt := 0; attempt <= maxRetries; attempt++ {
-			if attempt > 0 {
-				workerLogger.Warn("Retrying job due to judge timeout",
-					"job_id", job.ID,
-					"attempt", attempt,
-					"max_retries", maxRetries)
-			}
-
-			startTime := time.Now()
-			result = o.processJob(ctx, workerLogger, job, attempt)
-			result.Duration = time.Since(startTime)
-
-			// Success or non-timeout error - don't retry
-			if result.Error == nil || !errors.Is(result.Error, ErrJudgeTimeout) {
-				break
-			}
-
-			// Judge timeout - retry if attempts remain
-			if attempt < maxRetries {
-				continue
-			}
-
-			// All retries exhausted
-			workerLogger.Error("Job failed after all retries",
-				"job_id", job.ID,
-				"attempts", attempt+1,
-				"error", "judge consistently timed out")
-		}
+		// Process job (judge runs async, no retries needed)
+		startTime := time.Now()
+		result := o.processJob(ctx, workerLogger, job, 0)
+		result.Duration = time.Since(startTime)
 
 		results <- result
 	}
@@ -145,73 +103,13 @@ func (o *Orchestrator) processJob(
 	result.Rejected = rejectedResp.Choices[0].Message.Content
 	rejectedDuration := time.Since(rejectedStart)
 
-	// Run judge evaluation with timeout and cancellation
-	// When judge is enabled, we MUST get results for dataset consistency
-	var judgeDuration time.Duration
-	if o.judgeModule != nil {
-		judgeStart := time.Now()
-
-		// Create cancellable context for judge API call
-		judgeCtx, cancelJudge := context.WithCancel(ctx)
-		defer cancelJudge() // Ensure cleanup
-
-		judgeDone := make(chan *models.JudgeResult, 1)
-
-		// Launch judge evaluation with cancellable context
-		go func() {
-			judgeResult, err := o.judgeModule.Evaluate(judgeCtx, job.Prompt, result.Chosen, result.Rejected)
-			if err != nil {
-				// Don't log if cancelled (expected on timeout)
-				if judgeCtx.Err() != context.Canceled {
-					logger.Warn("Judge evaluation failed",
-						"job_id", job.ID,
-						"error", err)
-				}
-				judgeDone <- nil
-			} else {
-				judgeDone <- judgeResult
-			}
-		}()
-
-		// Wait for judge with configurable timeout
-		// Use judge model's configured timeout + 5s buffer for overhead
-		judgeModel := o.cfg.Models["judge"]
-		judgeTimeout := time.Duration(judgeModel.JudgeTimeoutSeconds)*time.Second + 5*time.Second
-		
-		select {
-		case judgeResult := <-judgeDone:
-			judgeDuration = time.Since(judgeStart)
-			if judgeResult == nil {
-				// Judge returned error - fail the job
-				result.Error = fmt.Errorf("judge evaluation failed")
-				return result
-			}
-			result.JudgeResult = judgeResult
-			logger.Debug("Judge completed",
-				"job_id", job.ID,
-				"duration_ms", judgeDuration.Milliseconds())
-		case <-time.After(judgeTimeout):
-			// Timeout - cancel HTTP request and return timeout error for retry
-			cancelJudge()
-			judgeDuration = time.Since(judgeStart)
-			logger.Debug("Judge timeout - will retry job",
-				"job_id", job.ID,
-				"attempt", attempt,
-				"waited_ms", judgeDuration.Milliseconds(),
-				"timeout_seconds", judgeModel.JudgeTimeoutSeconds)
-			result.Error = fmt.Errorf("%w: exceeded %ds", ErrJudgeTimeout, judgeModel.JudgeTimeoutSeconds)
-			return result
-		}
-	}
-
 	totalDuration := time.Since(jobStartTime)
 
-	// Log detailed timing breakdown for benchmark analysis
+	// Log detailed timing breakdown for benchmark analysis (judge runs async, not included)
 	logger.Info("Job processing breakdown",
 		"job_id", job.ID,
 		"chosen_ms", chosenDuration.Milliseconds(),
 		"rejected_ms", rejectedDuration.Milliseconds(),
-		"judge_ms", judgeDuration.Milliseconds(),
 		"total_ms", totalDuration.Milliseconds())
 
 	return result
@@ -229,7 +127,7 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 				"error", result.Error)
 			o.stats.FailureCount++
 		} else {
-			// Write to dataset
+			// Write to dataset (without judge results initially)
 			record := models.DatasetRecord{
 				MainTopic: result.Job.MainTopic,
 				SubTopic:  result.Job.SubTopic,
@@ -238,22 +136,22 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 				Rejected:  result.Rejected,
 			}
 
-			// Add judge results if available
-			if result.JudgeResult != nil {
-				record.ChosenScores = result.JudgeResult.ChosenScores
-				record.RejectedScores = result.JudgeResult.RejectedScores
-				record.ChosenScoreTotal = result.JudgeResult.ChosenScoreTotal
-				record.RejectedScoreTotal = result.JudgeResult.RejectedScoreTotal
-				record.PreferenceMargin = result.JudgeResult.PreferenceMargin
-			}
-
-			if err := o.dataWriter.WriteRecord(record); err != nil {
+			// Note: Judge results will be added asynchronously via background goroutines
+			// WriteRecord now returns the record index for later updates
+			recordIndex, err := o.dataWriter.WriteRecord(record)
+			if err != nil {
 				o.logger.Error("Failed to write record",
 					"job_id", result.Job.ID,
 					"error", err)
 				o.stats.FailureCount++
 			} else {
 				o.stats.SuccessCount++
+
+				// Spawn background judge goroutine (non-blocking!)
+				if o.judgeModule != nil {
+					o.pendingJudges.Add(1)
+					go o.evaluateJudgeAsync(recordIndex, result.Job.Prompt, result.Chosen, result.Rejected)
+				}
 
 				// Checkpoint progress (interval-based)
 				if o.checkpointMgr != nil {
@@ -265,5 +163,66 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 		}
 
 		_ = bar.Add(1)
+	}
+}
+
+// judgeUpdater runs in a background goroutine and processes judge result updates
+func (o *Orchestrator) judgeUpdater(ctx context.Context) {
+	for {
+		select {
+		case update, ok := <-o.judgeUpdates:
+			if !ok {
+				// Channel closed, updater shutting down
+				return
+			}
+			
+			// Update the record with judge results
+			err := o.dataWriter.UpdateRecord(update.recordIndex, update.judgeResult)
+			if err != nil {
+				o.logger.Error("Failed to update record with judge results",
+					"record_index", update.recordIndex,
+					"error", err)
+			} else {
+				o.logger.Debug("Updated record with judge results",
+					"record_index", update.recordIndex)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// evaluateJudgeAsync evaluates judge in background (non-blocking for workers)
+// This function spawns as a goroutine and runs independently
+func (o *Orchestrator) evaluateJudgeAsync(recordIndex int, prompt, chosen, rejected string) {
+	defer o.pendingJudges.Done()
+
+	// Acquire semaphore slot to limit concurrent judge goroutines
+	o.judgeSemaphore <- struct{}{}
+	defer func() { <-o.judgeSemaphore }()
+
+	// Create context with timeout for judge evaluation
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	// Evaluate (this blocks for 70-103s, but doesn't block workers!)
+	judgeResult, err := o.judgeModule.Evaluate(ctx, prompt, chosen, rejected)
+	if err != nil {
+		o.logger.Warn("Background judge evaluation failed",
+			"record_index", recordIndex,
+			"error", err)
+		return
+	}
+
+	// Send update to updater goroutine
+	select {
+	case o.judgeUpdates <- judgeUpdate{
+		recordIndex: recordIndex,
+		judgeResult: judgeResult,
+	}:
+		// Update queued successfully
+	case <-ctx.Done():
+		o.logger.Warn("Judge update dropped due to context cancellation",
+			"record_index", recordIndex)
 	}
 }

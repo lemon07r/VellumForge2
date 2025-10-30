@@ -19,6 +19,12 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+// judgeUpdate represents an async judge result update
+type judgeUpdate struct {
+	recordIndex int
+	judgeResult *models.JudgeResult
+}
+
 // Orchestrator manages the entire data generation pipeline
 type Orchestrator struct {
 	cfg           *config.Config
@@ -30,6 +36,10 @@ type Orchestrator struct {
 	stats         *models.SessionStats
 	checkpointMgr *checkpoint.Manager
 	resumeMode    bool
+	// Non-blocking judge support
+	judgeUpdates  chan judgeUpdate
+	pendingJudges sync.WaitGroup
+	judgeSemaphore chan struct{} // Limit concurrent judge goroutines
 }
 
 // New creates a new orchestrator
@@ -59,7 +69,7 @@ func New(
 		stats.StartTime = time.Now()
 	}
 
-	return &Orchestrator{
+	o := &Orchestrator{
 		cfg:           cfg,
 		secrets:       secrets,
 		apiClient:     apiClient,
@@ -70,6 +80,14 @@ func New(
 		checkpointMgr: checkpointMgr,
 		resumeMode:    resumeMode,
 	}
+
+	// Initialize non-blocking judge support if judge is enabled
+	if judgeModule != nil {
+		o.judgeUpdates = make(chan judgeUpdate, 100) // Buffer for async updates
+		o.judgeSemaphore = make(chan struct{}, 64)   // Limit to 64 concurrent judge goroutines
+	}
+
+	return o
 }
 
 // Run executes the complete generation pipeline
@@ -199,8 +217,23 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			"progress", fmt.Sprintf("%.1f%%", checkpoint.GetProgressPercentage(cp)))
 	}
 
+	// Start judge updater goroutine if judge is enabled
+	updaterCtx, cancelUpdater := context.WithCancel(ctx)
+	defer cancelUpdater()
+	if o.judgeModule != nil {
+		go o.judgeUpdater(updaterCtx)
+	}
+
 	if err := o.generatePreferencePairs(ctx, pendingJobs); err != nil {
 		return fmt.Errorf("failed to generate preference pairs: %w", err)
+	}
+
+	// Wait for all pending background judges to complete
+	if o.judgeModule != nil {
+		o.logger.Info("Waiting for background judge evaluations to complete...")
+		o.pendingJudges.Wait()
+		close(o.judgeUpdates)
+		o.logger.Info("All background judge evaluations complete")
 	}
 
 	// Finalize stats
