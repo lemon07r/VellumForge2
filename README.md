@@ -61,7 +61,7 @@ It's a good idea to also download the example configs to help get started.
 
 If you have issues with the latest release try downloading binaries for an older version. 
 
-### From Source (Recommended)
+### From Source
 
 ```bash
 # Clone the repository
@@ -180,6 +180,7 @@ model_name = "meta/llama-3.1-8b-instruct"
 temperature = 1.0  # Higher temp for lower quality responses
 max_output_tokens = 16384
 rate_limit_per_minute = 40
+# Try using a small local model for rejected responses to save API usage and avoid rate limiting
 
 [models.judge]
 enabled = true  # Set to false to disable judge evaluation
@@ -211,6 +212,10 @@ judge_rubric = '''Evaluate the following story according to multiple criteria...
 ### Environment Variables (.env)
 
 ```bash
+API_KEY=your-api-key-here
+# Generic API Key (RECOMMENDED for any OpenAI-compatible provider)
+# This works with ANY OpenAI-compatible API endpoint (Nebius, OpenRouter, local servers, etc.)
+# Just set the base_url in your config.toml and this key will be used automatically
 NVIDIA_API_KEY=nvapi-xxxxx
 OPENAI_API_KEY=sk-xxxxx
 HUGGING_FACE_TOKEN=hf_xxxxx
@@ -561,12 +566,6 @@ output/
 **Performance:** Checkpoint saves are asynchronous with < 1% throughput impact. Phase transitions use synchronous saves for data integrity.
 
 ### Concurrency Tuning
-
-**Benchmark Results** (v1.4.4, 32 jobs, NVIDIA NIM + local model):
-- 256 workers: **17.60/min** (fastest)
-- 96 workers: 14.79/min
-- 64 workers: 11.91/min  
-- 16 workers: 7.06/min
 
 Adjust worker pool size based on your setup:
 

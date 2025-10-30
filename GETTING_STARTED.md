@@ -159,7 +159,7 @@ temperature = 0.7
 
 [models.rejected]
 model_name = "meta/llama-3.1-8b-instruct"
-temperature = 0.9  # Higher temp for weaker responses
+temperature = 1.0  # Adjust the temp for desired quality of responses
 ```
 
 ### 2. Technical Writing Dataset
@@ -417,7 +417,7 @@ concurrency = 2048  # Now allowed
 num_subtopics = 50000  # Now allowed
 ```
 
-⚠️ **Warning**: Very high values may cause OOM or API rate limits
+**Warning**: Very high values may cause OOM or API rate limits
 
 ### Problem: "Exclusion list truncated" warning
 
@@ -677,7 +677,7 @@ concurrency = 2048  # Now allowed
 num_subtopics = 100000  # Now allowed
 ```
 
-⚠️ **Warning**: Only disable if you have sufficient memory and understand the implications.
+**Warning**: Only disable if you have sufficient memory and understand the implications.
 
 ### 6. Performance Optimizations
 
@@ -789,8 +789,7 @@ nvidia = 40  # Global provider limit
 provider_burst_percent = 20  # Higher burst for maximum throughput
 
 [generation]
-concurrency = 256  # Maximum workers (benchmark-proven suggestion)
-# Benchmark results: 256 workers = 17.60/min (2.5x faster than 16 workers)
+concurrency = 256  # Maximum workers 
 
 [models.main]
 rate_limit_per_minute = 40  # Per-model limit (ignored when provider limit set)
