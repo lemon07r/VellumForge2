@@ -173,7 +173,11 @@ func (o *Orchestrator) processJob(
 			}
 		}()
 
-		// Wait for judge with 100ms timeout
+		// Wait for judge with configurable timeout
+		// Use judge model's configured timeout + 5s buffer for overhead
+		judgeModel := o.cfg.Models["judge"]
+		judgeTimeout := time.Duration(judgeModel.JudgeTimeoutSeconds)*time.Second + 5*time.Second
+		
 		select {
 		case judgeResult := <-judgeDone:
 			judgeDuration = time.Since(judgeStart)
@@ -186,15 +190,16 @@ func (o *Orchestrator) processJob(
 			logger.Debug("Judge completed",
 				"job_id", job.ID,
 				"duration_ms", judgeDuration.Milliseconds())
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(judgeTimeout):
 			// Timeout - cancel HTTP request and return timeout error for retry
 			cancelJudge()
 			judgeDuration = time.Since(judgeStart)
 			logger.Debug("Judge timeout - will retry job",
 				"job_id", job.ID,
 				"attempt", attempt,
-				"waited_ms", judgeDuration.Milliseconds())
-			result.Error = fmt.Errorf("%w: exceeded 100ms", ErrJudgeTimeout)
+				"waited_ms", judgeDuration.Milliseconds(),
+				"timeout_seconds", judgeModel.JudgeTimeoutSeconds)
+			result.Error = fmt.Errorf("%w: exceeded %ds", ErrJudgeTimeout, judgeModel.JudgeTimeoutSeconds)
 			return result
 		}
 	}
