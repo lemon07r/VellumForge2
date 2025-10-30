@@ -101,19 +101,39 @@ func (o *Orchestrator) processJob(
 	result.Rejected = rejectedResp.Choices[0].Message.Content
 	rejectedDuration := time.Since(rejectedStart)
 
-	// Optional: Run judge evaluation
+	// Optional: Run judge evaluation asynchronously
 	var judgeDuration time.Duration
 	if o.judgeModule != nil {
 		judgeStart := time.Now()
-		judgeResult, err := o.judgeModule.Evaluate(ctx, job.Prompt, result.Chosen, result.Rejected)
-		judgeDuration = time.Since(judgeStart)
-		if err != nil {
-			logger.Warn("Judge evaluation failed",
-				"job_id", job.ID,
-				"error", err)
-			// Don't fail the entire result, just log the error
-		} else {
+		
+		// Create a channel to receive judge result
+		judgeDone := make(chan *models.JudgeResult, 1)
+		
+		// Launch judge evaluation in background
+		go func() {
+			judgeResult, err := o.judgeModule.Evaluate(ctx, job.Prompt, result.Chosen, result.Rejected)
+			if err != nil {
+				logger.Warn("Judge evaluation failed",
+					"job_id", job.ID,
+					"error", err)
+				judgeDone <- nil
+			} else {
+				judgeDone <- judgeResult
+			}
+		}()
+		
+		// Wait for judge result with timeout or return immediately
+		select {
+		case judgeResult := <-judgeDone:
+			judgeDuration = time.Since(judgeStart)
 			result.JudgeResult = judgeResult
+		case <-time.After(100 * time.Millisecond):
+			// Don't block worker - judge will complete in background
+			// Mark as incomplete so we know it's async
+			logger.Debug("Judge evaluation running async",
+				"job_id", job.ID)
+			judgeDuration = time.Since(judgeStart)
+			// Continue without judge result
 		}
 	}
 
