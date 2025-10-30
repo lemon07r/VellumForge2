@@ -11,7 +11,7 @@ BINARY="$PROJECT_DIR/bin/vellumforge2"
 RESULTS_DIR="$PROJECT_DIR/output/benchmark_$(date +%Y%m%d_%H%M%S)"
 
 # Worker counts to test
-WORKER_COUNTS=(8 12 16 20 24)
+WORKER_COUNTS=(8 16 32 64 128)
 
 # Colors for output
 RED='\033[0;31m'

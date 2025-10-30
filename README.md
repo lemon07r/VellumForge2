@@ -431,7 +431,7 @@ concurrency = 2048  # Now allowed
 num_subtopics = 50000  # Now allowed
 ```
 
-⚠️ **Warning**: Disabling limits may cause memory exhaustion or API rate limit issues. Only use when you have sufficient resources and understand the implications.
+**Warning**: Disabling limits may cause memory exhaustion or API rate limit issues. Only use when you have sufficient resources and understand the implications.
 
 ### Graceful Shutdown
 
@@ -780,6 +780,7 @@ VellumForge2 is currently considered feature complete, with all intended feature
 ---
 
 **Status**: **STABLE** (v1.0.0)
+
 **Status**: **RELEASE CANDIDATE** (v1.4.0) - Enhanced with Configurable Over-Generation, Graceful Shutdown, Large Performance Optimizations, Checkpoint/Resume, Async I/O, Benchmarking Tests, Agnostic Provider Support (with any OpenAI Compatible API) and CLI Management Tools
 
 

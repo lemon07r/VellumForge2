@@ -446,17 +446,17 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		subtopic string
 		index    int
 	}
-	
+
 	type promptResult struct {
 		index    int
 		subtopic string
 		prompts  []string
 		err      error
 	}
-	
+
 	tasksChan := make(chan subtopicTask, len(subtopics))
 	resultsChan := make(chan promptResult, len(subtopics))
-	
+
 	// Start workers
 	var wg sync.WaitGroup
 	for i := 0; i < o.cfg.Generation.Concurrency; i++ {
@@ -474,38 +474,38 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 			}
 		}(i)
 	}
-	
+
 	// Send tasks
 	for i, subtopic := range subtopics {
 		tasksChan <- subtopicTask{subtopic: subtopic, index: i}
 	}
 	close(tasksChan)
-	
+
 	// Wait for workers
 	go func() {
 		wg.Wait()
 		close(resultsChan)
 	}()
-	
+
 	// Collect results
 	results := make(map[int]promptResult)
 	bar := progressbar.Default(int64(len(subtopics)), "Generating prompts")
-	
+
 	for result := range resultsChan {
 		results[result.index] = result
 		_ = bar.Add(1)
-		
+
 		if result.err != nil {
 			o.logger.Error("Failed to generate prompts for subtopic",
 				"subtopic", result.subtopic,
 				"error", result.err)
 		}
 	}
-	
+
 	// Build jobs in order
 	var allJobs []models.GenerationJob
 	jobID := 0
-	
+
 	for i := 0; i < len(subtopics); i++ {
 		result, ok := results[i]
 		if !ok || result.err != nil {
@@ -514,7 +514,7 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 			}
 			return nil, fmt.Errorf("missing result for subtopic at index %d", i)
 		}
-		
+
 		for _, p := range result.prompts {
 			allJobs = append(allJobs, models.GenerationJob{
 				ID:        jobID,

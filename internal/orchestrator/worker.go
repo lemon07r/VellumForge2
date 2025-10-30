@@ -105,10 +105,10 @@ func (o *Orchestrator) processJob(
 	var judgeDuration time.Duration
 	if o.judgeModule != nil {
 		judgeStart := time.Now()
-		
+
 		// Create a channel to receive judge result
 		judgeDone := make(chan *models.JudgeResult, 1)
-		
+
 		// Launch judge evaluation in background
 		go func() {
 			judgeResult, err := o.judgeModule.Evaluate(ctx, job.Prompt, result.Chosen, result.Rejected)
@@ -121,7 +121,7 @@ func (o *Orchestrator) processJob(
 				judgeDone <- judgeResult
 			}
 		}()
-		
+
 		// Wait for judge result with timeout or return immediately
 		select {
 		case judgeResult := <-judgeDone:

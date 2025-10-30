@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -68,7 +67,6 @@ var (
 // Collector provides convenience methods for recording metrics
 type Collector struct {
 	logger *slog.Logger
-	mu     sync.Mutex
 }
 
 // NewCollector creates a new metrics collector
