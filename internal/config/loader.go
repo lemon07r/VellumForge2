@@ -91,12 +91,12 @@ func applyDefaults(cfg *Config) {
 			model.MaxRetries = 3 // Default to 3 retries
 		}
 		// If structure_temperature not set, it will use regular temperature (0 = unset)
-		
+
 		// Default judge timeout: 100 seconds (generous for slower models)
 		if model.JudgeTimeoutSeconds == 0 {
 			model.JudgeTimeoutSeconds = 100
 		}
-		
+
 		cfg.Models[name] = model
 	}
 
