@@ -1,6 +1,6 @@
 # VellumForge2
 
-**VellumForge2** is a highly configurable and easy to use open-source command-line tool for synthetically generating high-quality **Direct Preference Optimization (DPO)** datasets using Large Language Models (LLMs) written in Golang. It implements a hierarchical generation pipeline with optional LLM-as-a-Judge evaluation to create preference pairs suitable for fine-tuning language models.
+**VellumForge2** is a highly configurable, and easy to use open-source command-line tool for synthetically generating high-quality **Direct Preference Optimization (DPO)** datasets using Large Language Models (LLMs) written in Golang. It implements a high performance hierarchical generation pipeline with optional LLM-as-a-Judge evaluation to create preference pairs suitable for fine-tuning language models and supports checkpointing for session resumption.
 
 ## Key Features
 
@@ -23,9 +23,11 @@
 - Preference margin calculation for advanced DPO training
 
 ### **High Performance & Reliability**
-- Concurrent worker pool for parallel API requests
+- Concurrent worker pool for parallel API requests (supports 64-256 workers)
+- **Provider-level rate limiting** with configurable burst capacity
 - Per-model rate limiting with token bucket algorithm
 - Intelligent retry logic for rate limits (3^n backoff)
+- **Asynchronous judge evaluation** for non-blocking job completion
 - **Pre-validation layer** prevents JSON parse failures (99%+ success rate)
 - Robust JSON extraction with proper bracket matching
 - Auto-fixes truncated JSON responses
@@ -149,11 +151,17 @@ These are all generated using Kimi-K2-0905 from Nvidia NIM API for topics, promp
 ### Example Configuration (config.toml)
 
 ```toml
+# Provider-level rate limiting (v1.4.4+)
+[provider_rate_limits]
+nvidia = 40  # All NVIDIA models share this global limit
+
+provider_burst_percent = 15  # Burst capacity (default: 15%, range: 1-50%)
+
 [generation]
 main_topic = "Fantasy Fiction"
 num_subtopics = 64
 num_prompts_per_subtopic = 2
-concurrency = 8  # Number of parallel workers (max: 1024)
+concurrency = 64  # Recommended: 64-256 workers for maximum throughput, you can can run the benchmark script to evaluate the optimal number of workers with your config
 over_generation_buffer = 0.15  # Request 15% extra to hit target counts
 max_exclusion_list_size = 50  # Limit retry prompt size
 # disable_validation_limits = false  # Set true to exceed default limits
@@ -364,6 +372,8 @@ concurrency = 8  # 8 parallel workers
 
 **Smart Retry Logic**: VellumForge2 automatically applies longer exponential backoff for rate limit errors (6s → 18s → 54s), capped at 2 minutes by default.
 
+**Bencmarking Scripts** See the [Benchmarking README](BENCHMARK_README.md) to see how to evaluate your config.toml against different worker numbers to figure out the most suitable work numbers for your config.
+
 ## Configuration Best Practices
 
 ### Over-Generation Strategy
@@ -406,16 +416,50 @@ max_backoff_seconds = 120  # Optional: override default 2-minute cap
 - Increase for heavily rate-limited APIs (up to 300s / 5 minutes)
 - Judge models may need longer caps due to complex responses
 
+### Provider-Level Rate Limiting (v1.4.4+)
+
+```toml
+[provider_rate_limits]
+nvidia = 40  # All NVIDIA models share this 40 RPM limit
+
+provider_burst_percent = 15  # Configurable burst capacity (1-50%)
+
+[models.main]
+base_url = "https://integrate.api.nvidia.com/v1"
+rate_limit_per_minute = 40  # Ignored when provider limit is set
+
+[models.judge]
+base_url = "https://integrate.api.nvidia.com/v1"  
+rate_limit_per_minute = 40  # Ignored when provider limit is set
+```
+
+**How it works:**
+- Automatic provider detection from base URLs (nvidia, openai, anthropic, together)
+- Provider limit overrides individual model limits
+- All requests to the same provider share a single token bucket
+- Configurable burst capacity balances throughput and compliance
+
+**Burst Tuning:**
+- **15% (default)**: Balanced performance (6 burst requests at 40 RPM)
+- **20-25%**: Maximum throughput with 128-256 workers (8-10 burst requests)
+- **10-12%**: Minimize rate limit errors (4-5 burst requests)
+
+**Use cases:**
+- Multiple models on same provider (main + judge on NVIDIA)
+- High worker counts (64-256) with shared API endpoints
+- Preventing burst overages that cause 429 errors
+
 ### Safe Configuration Limits
 
 VellumForge2 enforces safety limits to prevent resource exhaustion:
 
 | Config Field | Min | Max | Recommended |
 |--------------|-----|-----|-------------|
-| `concurrency` | 1 | 1024* | 4-16 |
+| `concurrency` | 1 | 1024* | 64-256 (with provider limits) |
 | `num_subtopics` | 1 | 10,000* | 10-500 |
 | `num_prompts_per_subtopic` | 1 | 10,000* | 2-10 |
 | `over_generation_buffer` | 0.0 | 1.0 | 0.15 |
+| `provider_burst_percent` | 1 | 50 | 15 (balanced), 20+ (throughput) |
 | `max_output_tokens` | 1 | `context_size` | Model-specific |
 
 \* _Limits can be disabled by setting `disable_validation_limits = true` (use with caution)_
@@ -518,16 +562,34 @@ output/
 
 ### Concurrency Tuning
 
-Adjust worker pool size based on your API limits:
+**Benchmark Results** (v1.4.4, 32 jobs, NVIDIA NIM + local model):
+- 256 workers: **17.60/min** (fastest)
+- 96 workers: 14.79/min
+- 64 workers: 11.91/min  
+- 16 workers: 7.06/min
+
+Adjust worker pool size based on your setup:
 
 ```toml
 [generation]
-concurrency = 16  # More parallelism (higher throughput)
+concurrency = 256  # Maximum throughput (with fast local model + provider limits)
 # or
-concurrency = 2   # Less parallelism (lower API load)
+concurrency = 64   # Balanced throughput and resource usage
+# or
+concurrency = 16   # Conservative (if hitting rate limits or resource constraints)
 ```
 
-**Recommendation**: Start with `concurrency = 8` and adjust based on rate limit warnings.
+**Provider Rate Limiting** (v1.4.4+): Enables safe use of high worker counts
+```toml
+[provider_rate_limits]
+nvidia = 40  # Global limit prevents 429 errors with many workers
+
+provider_burst_percent = 15  # Default: balanced
+# 20-25 for maximum throughput with 128-256 workers
+# 10-12 to minimize rate limit errors
+```
+
+**Recommendation**: Start with `concurrency = 64` and `provider_burst_percent = 15`, then increase workers to 128-256 for maximum throughput if you have a fast local model for rejected responses. You can use the benchmark script to assist with testing your config.toml against different work numbers. See the [Benchmarking Readme](BENCHMARK_README.md), it's as simple as running `./scripts/quick_benchmark.sh 64 128 256` to test the config.toml in your working directory against those three worker numbers.
 
 ## Architecture
 
@@ -609,17 +671,35 @@ make fmt
 
 **Symptoms**: Warnings like "Too Many Requests", generation slowing down
 
-**Solution**: Reduce concurrency and rate limits in config:
+**Solution 1** (v1.4.4+): Use provider-level rate limiting (recommended):
+
+```toml
+[provider_rate_limits]
+nvidia = 40  # Global limit for all NVIDIA models
+
+provider_burst_percent = 12  # Lower burst reduces errors
+
+[generation]
+concurrency = 64  # Can still use high worker counts
+```
+
+**Solution 2**: Reduce concurrency (older approach):
 
 ```toml
 [generation]
-concurrency = 4  # Lower parallelism
+concurrency = 16  # Lower parallelism
 
 [models.main]
-rate_limit_per_minute = 20  # Conservative limit
+rate_limit_per_minute = 20  # Conservative per-model limit
 ```
 
 **What VellumForge2 Does**: Automatically applies 3^n exponential backoff (6s, 18s, 54s) for rate limit retries.
+
+**Provider Rate Limiting Benefits** (v1.4.4+):
+- Prevents multiple models from exceeding shared provider limits
+- Enables safe use of 64-256 workers with high-throughput local models
+- Better burst control with configurable capacity
+- Benchmark-proven 2.5x throughput improvement vs conservative settings
 
 ### Count Mismatches
 
@@ -719,7 +799,7 @@ If you use VellumForge2 in your research, please cite:
   author = {Lamim},
   year = {2025},
   url = {https://github.com/lemon07r/vellumforge2},
-  version = {1.1.0}
+  version = {1.4.4}
 }
 ```
 
@@ -735,6 +815,7 @@ Built with insights from:
 
 - [Getting Started Guide](GETTING_STARTED.md) - Step-by-step tutorial
 - [Changelog](CHANGELOG.md)
+- [Benchmarking README](BENCHMARK_README.md)
 
 ## Support
 
@@ -765,7 +846,10 @@ VellumForge2 is currently considered feature complete, with all intended feature
 - [x] **v1.2**: Config validation with upper bounds
 - [x] **v1.2**: Template caching for performance
 - [x] **v1.2**: Precompiled regex patterns
-- [x] **v1.3**: Resume from checkpoint on failure (v1.3)
+- [x] **v1.3**: Resume from checkpoint on failure
+- [x] **v1.4**: Provider-level rate limiting with configurable burst
+- [x] **v1.4**: Asynchronous judge evaluation
+- [x] **v1.4**: Performance logging and benchmarking tools
 
 ### Potential Ideas for Future Improvements
 - [ ] Support for additional DPO schema formats
@@ -779,8 +863,6 @@ VellumForge2 is currently considered feature complete, with all intended feature
 
 ---
 
-**Status**: **STABLE** (v1.0.0)
-
-**Status**: **RELEASE CANDIDATE** (v1.4.0) - Enhanced with Configurable Over-Generation, Graceful Shutdown, Large Performance Optimizations, Checkpoint/Resume, Async I/O, Benchmarking Tests, Agnostic Provider Support (with any OpenAI Compatible API) and CLI Management Tools
+**Status**: **STABLE** (v1.4.4) - Production-ready with provider rate limiting, 2.5x throughput improvements, async judge evaluation, and comprehensive benchmarking tools
 
 

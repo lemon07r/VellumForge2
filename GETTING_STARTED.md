@@ -63,11 +63,17 @@ nano config.toml  # or vim, code, etc.
 **Minimal configuration changes:**
 
 ```toml
+# Provider-level rate limiting (v1.4.4+, recommended)
+[provider_rate_limits]
+nvidia = 40  # Global limit for all NVIDIA models
+
+provider_burst_percent = 15  # Default: balanced performance
+
 [generation]
 main_topic = "Your Topic Here"  # Change this to your desired theme
 num_subtopics = 2               # Start small for testing (max: 10000)
 num_prompts_per_subtopic = 2    # Start small for testing (max: 10000)
-concurrency = 4                 # Adjust based on API limits (max: 1024)
+concurrency = 64                # Recommended: 64-256 for maximum throughput (max: 1024)
 over_generation_buffer = 0.15   # Request 15% extra to hit target counts
 max_exclusion_list_size = 50    # Limit retry prompt size
 
@@ -221,13 +227,24 @@ Return JSON with scores 1-5 for each criterion.
 
 ### Problem: "API rate limit exceeded"
 
-**Solution:** Reduce concurrency and rate limits
+**Solution 1** (v1.4.4+): Use provider-level rate limiting (recommended)
+```toml
+[provider_rate_limits]
+nvidia = 40  # Global limit prevents 429 errors
+
+provider_burst_percent = 12  # Lower burst for fewer errors
+
+[generation]
+concurrency = 64  # Can use high worker counts with provider limits
+```
+
+**Solution 2**: Reduce concurrency (older approach)
 ```toml
 [generation]
-concurrency = 2  # Lower parallelism
+concurrency = 16  # Lower parallelism
 
 [models.main]
-rate_limit_per_minute = 10  # Lower limit
+rate_limit_per_minute = 20  # Conservative limit
 ```
 
 ### Problem: "Failed to parse JSON response"
@@ -456,6 +473,66 @@ num_subtopics = 5000
 over_generation_buffer = 0.25  # Request 25% extra
 max_exclusion_list_size = 100  # Larger exclusion list for retries
 ```
+
+## New in v1.4.4
+
+VellumForge2 v1.4.4 brings provider-level rate limiting and major performance improvements:
+
+### Provider-Level Rate Limiting
+
+**What it is**: Global rate limits that apply across all models using the same API provider.
+
+**Why it matters**: When using multiple models on the same provider (e.g., main + judge both on NVIDIA), individual model rate limits can combine to exceed the provider's actual limit, causing 429 errors. Provider-level limiting prevents this.
+
+**How to use:**
+
+```toml
+[provider_rate_limits]
+nvidia = 40  # All NVIDIA models share this 40 RPM limit
+
+provider_burst_percent = 15  # Configurable burst (default: 15%)
+
+[generation]
+concurrency = 64  # Safe to use high worker counts now
+
+[models.main]
+base_url = "https://integrate.api.nvidia.com/v1"
+rate_limit_per_minute = 40  # Ignored when provider limit is set
+
+[models.judge]
+base_url = "https://integrate.api.nvidia.com/v1"
+rate_limit_per_minute = 40  # Ignored when provider limit is set
+```
+
+**Benefits:**
+- Prevents rate limit errors when multiple models share a provider
+- Enables safe use of 64-256 workers for 2.5x throughput improvement
+- Configurable burst capacity balances throughput and compliance
+- Automatic provider detection (nvidia, openai, anthropic, together)
+
+**Burst Tuning:**
+- 15% (default): Balanced performance
+- 20-25%: Maximum throughput with 128-256 workers
+- 10-12%: Minimize rate limit errors
+
+### Performance Improvements
+
+**Benchmark Results** (32 jobs, NVIDIA NIM + local Phi-4):
+- **256 workers: 17.60/min** (fastest)
+- 96 workers: 14.79/min
+- 64 workers: 11.91/min
+- 16 workers: 7.06/min (old recommendation)
+
+**Key improvements:**
+- **2.5x throughput** with optimized worker counts (256 vs 16)
+- Asynchronous judge evaluation (non-blocking)
+- Performance logging for bottleneck analysis
+- Comprehensive benchmarking scripts included
+
+**Benchmarking**
+Test your config.toml against various different worker numbers to evaluate the optimal number for you. See the [Benchmarking README](BENCHMARK_README.md) for more information, it's as easy as `./scripts/quick_benchmark.sh 64 128 256` to test the config.toml in your working directory against those three worker numbers.
+
+---
 
 ## New in v1.3.0
 
@@ -703,27 +780,44 @@ model_name = "claude-3-opus"
 
 ### Performance Tuning
 
-For maximum throughput (with sufficient API quota):
+For maximum throughput (v1.4.4+):
 
 ```toml
+[provider_rate_limits]
+nvidia = 40  # Global provider limit
+
+provider_burst_percent = 20  # Higher burst for maximum throughput
+
 [generation]
-concurrency = 16  # High parallelism
+concurrency = 256  # Maximum workers (benchmark-proven suggestion)
+# Benchmark results: 256 workers = 17.60/min (2.5x faster than 16 workers)
 
 [models.main]
-rate_limit_per_minute = 100  # If your plan supports it
-
-[models.rejected]
-rate_limit_per_minute = 100
+rate_limit_per_minute = 40  # Per-model limit (ignored when provider limit set)
 ```
+
+For balanced performance:
+
+```toml
+[provider_rate_limits]
+nvidia = 40
+
+provider_burst_percent = 15  # Default: balanced
+
+[generation]
+concurrency = 64  # Good balance of throughput and resource usage
+```
+
+Faster APIs with higher RPM limits can benefit from higher worker numbers. Use the benchmark scripts to evaluate your config.toml against various worker numbers. See the [Benchmarking README](BENCHMARK_README.md)
 
 For minimal API usage:
 
 ```toml
 [generation]
-concurrency = 1  # Sequential processing
+concurrency = 8  # Lower parallelism
 
 [models.main]
-rate_limit_per_minute = 5  # Minimal rate
+rate_limit_per_minute = 10  # Conservative limit
 ```
 
 ## Next Steps
