@@ -170,6 +170,12 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	// Create API client
 	apiClient := api.NewClient(logger)
 
+	// Set provider-level rate limits if configured
+	if len(cfg.ProviderRateLimits) > 0 {
+		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits)
+		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits)
+	}
+
 	// Set up checkpoint manager
 	var checkpointMgr *checkpoint.Manager
 
@@ -556,6 +562,12 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 
 	// Create API client
 	apiClient := api.NewClient(logger)
+
+	// Set provider-level rate limits if configured
+	if len(cfg.ProviderRateLimits) > 0 {
+		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits)
+		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits)
+	}
 
 	// Set up checkpoint manager
 	var checkpointMgr *checkpoint.Manager

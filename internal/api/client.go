@@ -29,11 +29,12 @@ const (
 
 // Client handles HTTP requests to OpenAI-compatible API endpoints
 type Client struct {
-	httpClient      *http.Client
-	rateLimiterPool *RateLimiterPool
-	logger          *slog.Logger
-	maxRetries      int
-	baseRetryDelay  time.Duration
+	httpClient         *http.Client
+	rateLimiterPool    *RateLimiterPool
+	logger             *slog.Logger
+	maxRetries         int
+	baseRetryDelay     time.Duration
+	providerRateLimits map[string]int // Provider-level rate limits (requests per minute)
 }
 
 // NewClient creates a new API client
@@ -42,11 +43,17 @@ func NewClient(logger *slog.Logger) *Client {
 		httpClient: &http.Client{
 			Timeout: DefaultHTTPTimeout,
 		},
-		rateLimiterPool: NewRateLimiterPool(),
-		logger:          logger,
-		maxRetries:      DefaultMaxRetries,
-		baseRetryDelay:  DefaultBaseRetryDelay,
+		rateLimiterPool:    NewRateLimiterPool(),
+		logger:             logger,
+		maxRetries:         DefaultMaxRetries,
+		baseRetryDelay:     DefaultBaseRetryDelay,
+		providerRateLimits: make(map[string]int),
 	}
+}
+
+// SetProviderRateLimits sets the global provider-level rate limits
+func (c *Client) SetProviderRateLimits(limits map[string]int) {
+	c.providerRateLimits = limits
 }
 
 // SetMaxRetries sets the maximum number of retry attempts
@@ -66,9 +73,18 @@ func (c *Client) ChatCompletion(
 	// Generate a unique model ID for rate limiting
 	modelID := fmt.Sprintf("%s:%s", modelCfg.BaseURL, modelCfg.ModelName)
 
-	// Wait for rate limiter
+	// Get provider name and check for provider-level rate limit
+	providerName := config.GetProviderName(modelCfg.BaseURL)
+	providerRPM := 0
+	if c.providerRateLimits != nil {
+		if rpm, ok := c.providerRateLimits[providerName]; ok {
+			providerRPM = rpm
+		}
+	}
+
+	// Wait for rate limiter (provider-level if configured, otherwise model-level)
 	rateLimitStart := time.Now()
-	if err := c.rateLimiterPool.Wait(ctx, modelID, modelCfg.RateLimitPerMinute); err != nil {
+	if err := c.rateLimiterPool.Wait(ctx, modelID, modelCfg.RateLimitPerMinute, providerName, providerRPM); err != nil {
 		return nil, fmt.Errorf("rate limiter wait failed: %w", err)
 	}
 	rateLimitWait := time.Since(rateLimitStart)

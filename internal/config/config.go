@@ -8,10 +8,11 @@ import (
 
 // Config represents the complete application configuration
 type Config struct {
-	Generation      GenerationConfig       `toml:"generation"`
-	Models          map[string]ModelConfig `toml:"models"`
-	PromptTemplates PromptTemplates        `toml:"prompt_templates"`
-	HuggingFace     HuggingFaceConfig      `toml:"huggingface"`
+	Generation         GenerationConfig       `toml:"generation"`
+	Models             map[string]ModelConfig `toml:"models"`
+	PromptTemplates    PromptTemplates        `toml:"prompt_templates"`
+	HuggingFace        HuggingFaceConfig      `toml:"huggingface"`
+	ProviderRateLimits map[string]int         `toml:"provider_rate_limits"` // Global rate limits per provider (requests per minute)
 }
 
 // GenerationConfig holds generation-specific settings
@@ -246,6 +247,25 @@ func (s *Secrets) GetAPIKey(baseURL string) string {
 
 	// If no key found, return empty (could be local server without auth)
 	return ""
+}
+
+// GetProviderName extracts a provider name from a base URL for rate limiting
+func GetProviderName(baseURL string) string {
+	// Match common provider domains
+	if contains(baseURL, "openai.com") {
+		return "openai"
+	}
+	if contains(baseURL, "nvidia.com") {
+		return "nvidia"
+	}
+	if contains(baseURL, "anthropic.com") {
+		return "anthropic"
+	}
+	if contains(baseURL, "together.xyz") || contains(baseURL, "together.ai") {
+		return "together"
+	}
+	// For localhost or unknown providers, use the full base URL as provider name
+	return baseURL
 }
 
 // contains checks if a string contains a substring

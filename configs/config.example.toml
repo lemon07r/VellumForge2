@@ -1,6 +1,17 @@
 # VellumForge2 Configuration Example
 # This file demonstrates all available configuration options
 
+# Global provider-level rate limits (optional)
+# These override individual model rate limits for all models using the same provider
+# Useful when a provider has a global API rate limit that applies across all models
+# Provider rate limiters use conservative 10% burst capacity to prevent overages
+# when multiple models/workers share the same endpoint
+[provider_rate_limits]
+# nvidia = 40  # All NVIDIA models share this limit (set slightly below actual limit)
+# openai = 500
+# anthropic = 200
+# together = 100
+
 [generation]
 # The main theme/topic for dataset generation
 main_topic = "Fantasy Fiction"
