@@ -104,7 +104,7 @@ else:
     
     if [ $? -eq 0 ]; then
         IFS=',' read -r duration throughput avg_total rate_wait blocking <<< "$METRICS"
-        duration_min=$(printf "%.2f" "$(echo "$duration / 60" | bc -l)")
+        duration_min=$(python3 -c "print(f'{$duration / 60:.2f}')")
         
         echo "  Duration: ${duration_min} min | Throughput: ${throughput} jobs/min | Rate Wait: ${rate_wait}ms"
         

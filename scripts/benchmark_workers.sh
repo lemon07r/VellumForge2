@@ -181,7 +181,7 @@ for workers in "${WORKER_COUNTS[@]}"; do
     # Display results
     echo ""
     echo "Results:"
-    echo "  Duration:          ${DURATION}s ($(echo "scale=2; $DURATION/60" | bc) min)"
+    echo "  Duration:          ${DURATION}s ($(python3 -c "print(f'{$DURATION/60:.2f}')") min)"
     echo "  Throughput:        ${THROUGHPUT} jobs/min"
     echo "  Avg Time per Job:  ${AVG_TOTAL}s"
     echo "  Rate Limit Wait:   ${RATE_LIMIT_WAIT}ms"
@@ -220,7 +220,7 @@ BEST_WORKERS=0
 for result in "${RESULTS[@]}"; do
     IFS='|' read -r workers duration throughput avg_total rate_wait blocking session <<< "$result"
     
-    duration_min=$(printf "%.2f" "$(echo "$duration/60" | bc -l)")
+    duration_min=$(python3 -c "print(f'{$duration/60:.2f}')")
     
     printf "%-10s %-15s %-18s %-18s %-18s %-15s\n" \
         "$workers" "$duration_min" "$throughput" "$avg_total" "$rate_wait" "$blocking"
