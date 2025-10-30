@@ -216,9 +216,12 @@ func (c *Client) doRequest(
 	apiKey string,
 	req ChatCompletionRequest,
 ) (*ChatCompletionResponse, error) {
-	// Marshal request body
-	body, err := json.Marshal(req)
-	if err != nil {
+	// Get buffer from pool for request body
+	buf := getBuffer()
+	defer putBuffer(buf)
+
+	// Encode request directly to buffer (avoids intermediate allocation)
+	if err := json.NewEncoder(buf).Encode(req); err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -229,7 +232,8 @@ func (c *Client) doRequest(
 	}
 	endpoint += "chat/completions"
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	// Use bytes.NewReader with the buffered data
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

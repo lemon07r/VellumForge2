@@ -36,17 +36,18 @@ type ModelConfig struct {
 	BaseURL              string  `toml:"base_url"`
 	ModelName            string  `toml:"model_name"`
 	Temperature          float64 `toml:"temperature"`
-	StructureTemperature float64 `toml:"structure_temperature"` // Temperature for JSON generation (optional, defaults to temperature)
+	StructureTemperature float64 `toml:"structure_temperature"`      // Temperature for JSON generation (optional, defaults to temperature)
 	TopP                 float64 `toml:"top_p"`
 	TopK                 int     `toml:"top_k"`
 	MinP                 float64 `toml:"min_p"`
 	MaxOutputTokens      int     `toml:"max_output_tokens"`
 	ContextSize          int     `toml:"context_size"`
 	RateLimitPerMinute   int     `toml:"rate_limit_per_minute"`
-	MaxBackoffSeconds    int     `toml:"max_backoff_seconds"` // Optional: max backoff duration (default 120)
-	MaxRetries           int     `toml:"max_retries"`         // Optional: max retry attempts (default 3, 0 = unlimited)
-	UseJSONMode          bool    `toml:"use_json_mode"`       // Enable structured JSON output mode (optional)
-	Enabled              bool    `toml:"enabled"`             // Only used for judge model
+	MaxBackoffSeconds    int     `toml:"max_backoff_seconds"`        // Optional: max backoff duration (default 120)
+	MaxRetries           int     `toml:"max_retries"`                // Optional: max retry attempts (default 3, 0 = unlimited)
+	JudgeTimeoutSeconds  int     `toml:"judge_timeout_seconds,omitempty"` // Timeout for judge API calls (default: 100s)
+	UseJSONMode          bool    `toml:"use_json_mode"`              // Enable structured JSON output mode (optional)
+	Enabled              bool    `toml:"enabled"`                    // Only used for judge model
 }
 
 // PromptTemplates holds all customizable prompt templates

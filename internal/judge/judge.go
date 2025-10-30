@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/lamim/vellumforge2/internal/api"
 	"github.com/lamim/vellumforge2/internal/config"
@@ -72,7 +73,13 @@ func (j *Judge) evaluateSingle(ctx context.Context, prompt, story string) (map[s
 	judgeModel := j.cfg.Models["judge"]
 	apiKey := j.secrets.GetAPIKey(judgeModel.BaseURL)
 
-	resp, err := j.apiClient.ChatCompletion(ctx, judgeModel, apiKey, []api.Message{
+	// Create timeout context for judge API call
+	// Use configured timeout (default: 100s, generous for slower models)
+	timeoutDuration := time.Duration(judgeModel.JudgeTimeoutSeconds) * time.Second
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
+	defer cancel()
+
+	resp, err := j.apiClient.ChatCompletion(timeoutCtx, judgeModel, apiKey, []api.Message{
 		{Role: "user", Content: judgePrompt},
 	})
 	if err != nil {
