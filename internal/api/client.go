@@ -29,12 +29,13 @@ const (
 
 // Client handles HTTP requests to OpenAI-compatible API endpoints
 type Client struct {
-	httpClient         *http.Client
-	rateLimiterPool    *RateLimiterPool
-	logger             *slog.Logger
-	maxRetries         int
-	baseRetryDelay     time.Duration
-	providerRateLimits map[string]int // Provider-level rate limits (requests per minute)
+	httpClient           *http.Client
+	rateLimiterPool      *RateLimiterPool
+	logger               *slog.Logger
+	maxRetries           int
+	baseRetryDelay       time.Duration
+	providerRateLimits   map[string]int // Provider-level rate limits (requests per minute)
+	providerBurstPercent int            // Burst capacity as percentage for provider limiters
 }
 
 // NewClient creates a new API client
@@ -52,8 +53,12 @@ func NewClient(logger *slog.Logger) *Client {
 }
 
 // SetProviderRateLimits sets the global provider-level rate limits
-func (c *Client) SetProviderRateLimits(limits map[string]int) {
+func (c *Client) SetProviderRateLimits(limits map[string]int, burstPercent int) {
 	c.providerRateLimits = limits
+	c.providerBurstPercent = burstPercent
+	if c.providerBurstPercent == 0 {
+		c.providerBurstPercent = 15 // Default: 15% burst
+	}
 }
 
 // SetMaxRetries sets the maximum number of retry attempts
@@ -84,7 +89,7 @@ func (c *Client) ChatCompletion(
 
 	// Wait for rate limiter (provider-level if configured, otherwise model-level)
 	rateLimitStart := time.Now()
-	if err := c.rateLimiterPool.Wait(ctx, modelID, modelCfg.RateLimitPerMinute, providerName, providerRPM); err != nil {
+	if err := c.rateLimiterPool.Wait(ctx, modelID, modelCfg.RateLimitPerMinute, providerName, providerRPM, c.providerBurstPercent); err != nil {
 		return nil, fmt.Errorf("rate limiter wait failed: %w", err)
 	}
 	rateLimitWait := time.Since(rateLimitStart)

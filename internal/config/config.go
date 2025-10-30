@@ -8,11 +8,12 @@ import (
 
 // Config represents the complete application configuration
 type Config struct {
-	Generation         GenerationConfig       `toml:"generation"`
-	Models             map[string]ModelConfig `toml:"models"`
-	PromptTemplates    PromptTemplates        `toml:"prompt_templates"`
-	HuggingFace        HuggingFaceConfig      `toml:"huggingface"`
-	ProviderRateLimits map[string]int         `toml:"provider_rate_limits"` // Global rate limits per provider (requests per minute)
+	Generation           GenerationConfig       `toml:"generation"`
+	Models               map[string]ModelConfig `toml:"models"`
+	PromptTemplates      PromptTemplates        `toml:"prompt_templates"`
+	HuggingFace          HuggingFaceConfig      `toml:"huggingface"`
+	ProviderRateLimits   map[string]int         `toml:"provider_rate_limits"`   // Global rate limits per provider (requests per minute)
+	ProviderBurstPercent int                    `toml:"provider_burst_percent"` // Burst capacity as percentage (1-50, default: 15)
 }
 
 // GenerationConfig holds generation-specific settings
@@ -79,6 +80,15 @@ const (
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
+	// Set default provider burst percent if not specified
+	if c.ProviderBurstPercent == 0 {
+		c.ProviderBurstPercent = 15 // Default: 15% burst
+	}
+	// Validate provider burst percent range
+	if c.ProviderBurstPercent < 1 || c.ProviderBurstPercent > 50 {
+		return fmt.Errorf("provider_burst_percent must be between 1 and 50 (got %d)", c.ProviderBurstPercent)
+	}
+
 	// Validate generation config
 	if c.Generation.MainTopic == "" {
 		return fmt.Errorf("generation.main_topic is required")

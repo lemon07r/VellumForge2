@@ -65,9 +65,8 @@ func (p *RateLimiterPool) GetOrCreate(modelID string, requestsPerMinute int) *ra
 }
 
 // GetOrCreateProvider returns an existing provider rate limiter or creates a new one
-// Uses more conservative burst capacity (10%) compared to model-level limiters (20%)
-// to prevent burst overages when multiple models share the same provider
-func (p *RateLimiterPool) GetOrCreateProvider(providerName string, requestsPerMinute int) *rate.Limiter {
+// Uses configurable burst capacity (default 15%) to balance throughput and rate limit compliance
+func (p *RateLimiterPool) GetOrCreateProvider(providerName string, requestsPerMinute int, burstPercent int) *rate.Limiter {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -88,9 +87,13 @@ func (p *RateLimiterPool) GetOrCreateProvider(providerName string, requestsPerMi
 
 	// Create new limiter: convert requests per minute to requests per second
 	rps := float64(requestsPerMinute) / 60.0
-	// Use conservative 10% burst for provider-level limiters to prevent burst overages
-	// when multiple models/workers share the same provider endpoint
-	burst := max(3, requestsPerMinute/10)
+	// Use configurable burst capacity (default 15%) to balance throughput and rate limit compliance
+	// Higher burst (20%+) improves throughput with many workers but may cause more rate limit errors
+	// Lower burst (10%-) reduces rate limit errors but may throttle throughput unnecessarily
+	if burstPercent == 0 {
+		burstPercent = 15 // Default: 15% burst
+	}
+	burst := max(3, (requestsPerMinute*burstPercent)/100)
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 	p.providerLimiters[providerName] = limiter
 	p.providerRates[providerName] = requestsPerMinute
@@ -99,17 +102,18 @@ func (p *RateLimiterPool) GetOrCreateProvider(providerName string, requestsPerMi
 		"provider", providerName,
 		"rpm", requestsPerMinute,
 		"rps", rps,
-		"burst", burst)
+		"burst", burst,
+		"burst_percent", burstPercent)
 
 	return limiter
 }
 
 // Wait blocks until the rate limiter allows the next request
 // If providerName is not empty and providerRPM > 0, uses provider-level rate limiting
-func (p *RateLimiterPool) Wait(ctx context.Context, modelID string, requestsPerMinute int, providerName string, providerRPM int) error {
+func (p *RateLimiterPool) Wait(ctx context.Context, modelID string, requestsPerMinute int, providerName string, providerRPM int, burstPercent int) error {
 	// Use provider-level rate limiting if configured
 	if providerName != "" && providerRPM > 0 {
-		limiter := p.GetOrCreateProvider(providerName, providerRPM)
+		limiter := p.GetOrCreateProvider(providerName, providerRPM, burstPercent)
 		return limiter.Wait(ctx)
 	}
 

@@ -172,8 +172,8 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 
 	// Set provider-level rate limits if configured
 	if len(cfg.ProviderRateLimits) > 0 {
-		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits)
-		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits)
+		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits, cfg.ProviderBurstPercent)
+		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits, "burst_percent", cfg.ProviderBurstPercent)
 	}
 
 	// Set up checkpoint manager
@@ -565,8 +565,8 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 
 	// Set provider-level rate limits if configured
 	if len(cfg.ProviderRateLimits) > 0 {
-		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits)
-		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits)
+		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits, cfg.ProviderBurstPercent)
+		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits, "burst_percent", cfg.ProviderBurstPercent)
 	}
 
 	// Set up checkpoint manager
