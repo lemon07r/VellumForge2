@@ -61,13 +61,17 @@ func (c *Client) ChatCompletion(
 	apiKey string,
 	messages []Message,
 ) (*ChatCompletionResponse, error) {
+	requestStart := time.Now()
+	
 	// Generate a unique model ID for rate limiting
 	modelID := fmt.Sprintf("%s:%s", modelCfg.BaseURL, modelCfg.ModelName)
 
 	// Wait for rate limiter
+	rateLimitStart := time.Now()
 	if err := c.rateLimiterPool.Wait(ctx, modelID, modelCfg.RateLimitPerMinute); err != nil {
 		return nil, fmt.Errorf("rate limiter wait failed: %w", err)
 	}
+	rateLimitWait := time.Since(rateLimitStart)
 
 	// Construct request
 	req := ChatCompletionRequest{
@@ -93,6 +97,7 @@ func (c *Client) ChatCompletion(
 		maxAttempts = c.maxRetries // Fallback to client default
 	}
 	
+	apiCallStart := time.Now()
 	for attempt := 0; maxAttempts < 0 || attempt <= maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Calculate backoff with jitter
@@ -131,6 +136,16 @@ func (c *Client) ChatCompletion(
 
 		resp, err := c.doRequest(ctx, modelCfg.BaseURL, apiKey, req)
 		if err == nil {
+			apiCallDuration := time.Since(apiCallStart)
+			totalDuration := time.Since(requestStart)
+			
+			// Log performance metrics
+			c.logger.Debug("API request completed",
+				"model", modelCfg.ModelName,
+				"rate_limit_wait_ms", rateLimitWait.Milliseconds(),
+				"api_duration_ms", apiCallDuration.Milliseconds(),
+				"total_ms", totalDuration.Milliseconds())
+			
 			// Check finish_reason for truncation
 			if len(resp.Choices) > 0 && resp.Choices[0].FinishReason == "length" {
 				c.logger.Warn("Response truncated due to max_tokens limit",

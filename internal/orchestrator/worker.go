@@ -48,11 +48,13 @@ func (o *Orchestrator) processJob(
 	logger *slog.Logger,
 	job models.GenerationJob,
 ) models.GenerationResult {
+	jobStartTime := time.Now()
 	result := models.GenerationResult{
 		Job: job,
 	}
 
 	// Generate chosen response (main model)
+	chosenStart := time.Now()
 	mainModel := o.cfg.Models["main"]
 	mainAPIKey := o.secrets.GetAPIKey(mainModel.BaseURL)
 
@@ -73,8 +75,10 @@ func (o *Orchestrator) processJob(
 		return result
 	}
 	result.Chosen = chosenResp.Choices[0].Message.Content
+	chosenDuration := time.Since(chosenStart)
 
 	// Generate rejected response (rejected model)
+	rejectedStart := time.Now()
 	rejectedModel := o.cfg.Models["rejected"]
 	rejectedAPIKey := o.secrets.GetAPIKey(rejectedModel.BaseURL)
 
@@ -95,10 +99,14 @@ func (o *Orchestrator) processJob(
 		return result
 	}
 	result.Rejected = rejectedResp.Choices[0].Message.Content
+	rejectedDuration := time.Since(rejectedStart)
 
 	// Optional: Run judge evaluation
+	var judgeDuration time.Duration
 	if o.judgeModule != nil {
+		judgeStart := time.Now()
 		judgeResult, err := o.judgeModule.Evaluate(ctx, job.Prompt, result.Chosen, result.Rejected)
+		judgeDuration = time.Since(judgeStart)
 		if err != nil {
 			logger.Warn("Judge evaluation failed",
 				"job_id", job.ID,
@@ -108,6 +116,16 @@ func (o *Orchestrator) processJob(
 			result.JudgeResult = judgeResult
 		}
 	}
+
+	totalDuration := time.Since(jobStartTime)
+
+	// Log detailed timing breakdown for benchmark analysis
+	logger.Info("Job processing breakdown",
+		"job_id", job.ID,
+		"chosen_ms", chosenDuration.Milliseconds(),
+		"rejected_ms", rejectedDuration.Milliseconds(),
+		"judge_ms", judgeDuration.Milliseconds(),
+		"total_ms", totalDuration.Milliseconds())
 
 	return result
 }
