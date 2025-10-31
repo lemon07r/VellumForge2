@@ -175,7 +175,7 @@ func (o *Orchestrator) judgeUpdater(ctx context.Context) {
 				// Channel closed, updater shutting down
 				return
 			}
-			
+
 			// Update the record with judge results
 			err := o.dataWriter.UpdateRecord(update.recordIndex, update.judgeResult)
 			if err != nil {

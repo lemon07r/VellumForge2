@@ -161,7 +161,7 @@ func (j *Judge) evaluateSingle(ctx context.Context, prompt, story string) (map[s
 				"error", lastErr,
 				"response_length", len(content),
 				"response", content)
-			return nil, fmt.Errorf("failed to parse judge response after %d attempts: %w (response: %s)", 
+			return nil, fmt.Errorf("failed to parse judge response after %d attempts: %w (response: %s)",
 				maxParseRetries+1, lastErr, truncateString(content, 500))
 		}
 	}

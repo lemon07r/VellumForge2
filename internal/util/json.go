@@ -46,17 +46,17 @@ func ExtractJSON(s string) string {
 		if objectEnd != -1 {
 			return s[objectStart : objectEnd+1]
 		}
-		
+
 		// Truncated object - try to close it
 		// This handles cases where API response was cut off mid-JSON
 		lastQuote := strings.LastIndex(s, "\"")
 		if lastQuote > objectStart {
 			// Has content, need to close the object
 			trimmed := strings.TrimRight(s[objectStart:], " \n\t,")
-			
+
 			// Count unmatched opening braces to determine how many closes we need
 			openBraces := countUnmatchedBraces(trimmed, '{', '}')
-			
+
 			// Close all unmatched braces
 			for i := 0; i < openBraces; i++ {
 				trimmed += "}"

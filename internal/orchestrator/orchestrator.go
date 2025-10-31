@@ -37,8 +37,8 @@ type Orchestrator struct {
 	checkpointMgr *checkpoint.Manager
 	resumeMode    bool
 	// Non-blocking judge support
-	judgeUpdates  chan judgeUpdate
-	pendingJudges sync.WaitGroup
+	judgeUpdates   chan judgeUpdate
+	pendingJudges  sync.WaitGroup
 	judgeSemaphore chan struct{} // Limit concurrent judge goroutines
 }
 
