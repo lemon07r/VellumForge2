@@ -862,6 +862,6 @@ VellumForge2 is currently considered feature complete, with all intended feature
 
 ---
 
-**Status**: **STABLE** (v1.4.4) - Production-ready with provider rate limiting, 2.5x throughput improvements, async judge evaluation, and comprehensive benchmarking tools
+**Status**: **STABLE** (v1.4.11) - Production-ready with provider rate limiting, 2.5x throughput improvements, async judge evaluation, improved retry logic, JSON parser improvements, and comprehensive benchmarking tools
 
 

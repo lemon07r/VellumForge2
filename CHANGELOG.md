@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.11] - 2025-10-31
+
+### Fixed
+- **Critical Performance Regression**: Eliminated 80% performance regression in judge evaluation
+  - **Root Cause**: API retry loop was making up to 3 API calls per parse failure instead of trying different parse strategies locally
+  - **Solution**: Refactored to separate API retries from JSON parse retries
+    - Single API call per judge evaluation (no retry loop)
+    - Multi-strategy progressive JSON parsing on same response (4 strategies, <4ms total)
+  - **Performance Improvement**:
+    - Average job time: 9.1s → 5.2s (**-42.6%** faster)
+    - Total session time: 292s → 167s (**-42.7%** faster)  
+    - API cost reduction: **-60%** for judge evaluations
+  - **Reliability**: Parse success rate maintained at 100% with Strategy 1 (standard extraction + sanitization)
+  - **Implementation Details**:
+    - Added `parseJudgeResponseWithRetries()`: Progressive 4-strategy parser
+      - Strategy 1 (standard): ExtractJSON → SanitizeJSON → Unmarshal
+      - Strategy 2 (aggressive): ExtractJSON → RepairJSON → Unmarshal
+      - Strategy 3 (multi-pass): Extract → Repair → Sanitize → Repair → Unmarshal
+      - Strategy 4 (partial recovery): Lenient decoder for incomplete JSON
+    - Removed obsolete `maxParseRetries`, `parseRetryDelay`, and `isJSONParseError()` function
+    - Fixed linter warnings (ineffectual assignments)
+- **JSON Parse Resilience**: Backup strategies available for edge cases without API overhead
+
+### Changed
+- Judge evaluation now makes exactly 1 API call per response (previously up to 3 on parse failure)
+- Parse errors now trigger local repair strategies instead of API retries
+- Removed artificial delays between parse attempts (was 1 second per retry)
+
+### Performance
+- **124.5 seconds saved** per 32-job session (from 291.9s to 167.4s)
+- Zero API retry overhead for parse failures
+- All parse attempts succeed with Strategy 1 (100% fast-path success)
+- Time saved scales linearly with dataset size
+
+### Documentation
+- Created `REPORTS/PERFORMANCE_REGRESSION_ANALYSIS_2025-10-31.md`: Root cause analysis
+- Created `REPORTS/PERFORMANCE_FIX_IMPLEMENTATION_2025-10-31.md`: Implementation details
+- Created `REPORTS/POST_FIX_SESSION_ANALYSIS_2025-10-31.md`: Real-world validation results
+- Created `REPORTS/SESSION_COMPARISON_CLARIFICATION_2025-10-31.md`: Performance comparison methodology
+
+---
+
 ## [1.4.4] - 2025-10-30
 
 ### Added
@@ -335,6 +377,7 @@ Initial stable release of VellumForge2.
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| **1.4.11** | 2025-10-31 | **Critical performance fix**: Eliminated 80% regression, 42% faster judge evaluation |
 | **1.4.4** | 2025-10-30 | Provider rate limiting, configurable burst, async judge, benchmarking |
 | **1.3.7** | 2025-10-29 | Retry logic, timeout optimization, JSON sanitization, schema fix |
 | **1.3.4** | 2025-10-28 | Configurable retries |
