@@ -225,6 +225,68 @@ func TestTruncateString(t *testing.T) {
 	}
 }
 
+func TestIsJSONParseError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "unexpected end of JSON input",
+			err:      &ParseError{message: "unexpected end of JSON input"},
+			expected: true,
+		},
+		{
+			name:     "failed to unmarshal JSON",
+			err:      &ParseError{message: "failed to unmarshal JSON"},
+			expected: true,
+		},
+		{
+			name:     "invalid character",
+			err:      &ParseError{message: "invalid character 'x' looking for beginning of value"},
+			expected: true,
+		},
+		{
+			name:     "JSON decode error",
+			err:      &ParseError{message: "JSON decode error: some issue"},
+			expected: true,
+		},
+		{
+			name:     "network error (non-JSON)",
+			err:      &ParseError{message: "network connection timeout"},
+			expected: false,
+		},
+		{
+			name:     "API error (non-JSON)",
+			err:      &ParseError{message: "API returned 500 status code"},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isJSONParseError(tt.err)
+			if got != tt.expected {
+				t.Errorf("isJSONParseError(%v) = %v, want %v", tt.err, got, tt.expected)
+			}
+		})
+	}
+}
+
+// ParseError is a simple error type for testing
+type ParseError struct {
+	message string
+}
+
+func (e *ParseError) Error() string {
+	return e.message
+}
+
 // Helper function to create a test judge instance
 func setupTestJudge() *Judge {
 	return &Judge{

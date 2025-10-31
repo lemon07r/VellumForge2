@@ -46,10 +46,73 @@ func ExtractJSON(s string) string {
 		if objectEnd != -1 {
 			return s[objectStart : objectEnd+1]
 		}
+		
+		// Truncated object - try to close it
+		// This handles cases where API response was cut off mid-JSON
+		lastQuote := strings.LastIndex(s, "\"")
+		if lastQuote > objectStart {
+			// Has content, need to close the object
+			trimmed := strings.TrimRight(s[objectStart:], " \n\t,")
+			
+			// Count unmatched opening braces to determine how many closes we need
+			openBraces := countUnmatchedBraces(trimmed, '{', '}')
+			
+			// Close all unmatched braces
+			for i := 0; i < openBraces; i++ {
+				trimmed += "}"
+			}
+			return trimmed
+		}
 	}
 
 	// Return as-is if no extraction needed
 	return s
+}
+
+// countUnmatchedBraces counts the number of unmatched opening brackets
+// This is used to determine how many closing brackets to add for truncated JSON
+func countUnmatchedBraces(s string, openChar, closeChar rune) int {
+	count := 0
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(s); i++ {
+		ch := rune(s[i])
+
+		// Handle escape sequences
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+
+		// Handle strings
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+
+		// Only count brackets outside of strings
+		if !inString {
+			switch ch {
+			case openChar:
+				count++
+			case closeChar:
+				count--
+			}
+		}
+	}
+
+	// Return the number of unmatched opening brackets
+	// If count is negative, there are extra closing brackets (shouldn't happen)
+	if count < 0 {
+		return 0
+	}
+	return count
 }
 
 // findMatchingBracket finds the matching closing bracket for an opening bracket

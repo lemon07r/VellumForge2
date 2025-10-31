@@ -36,6 +36,26 @@ func TestExtractJSON(t *testing.T) {
 			input:    `{"key": "value"}`,
 			wantType: "object",
 		},
+		{
+			name:     "truncated object - missing closing brace",
+			input:    `{"field1": "value1", "field2": "value2"`,
+			wantType: "object",
+		},
+		{
+			name:     "truncated object - missing nested closing braces",
+			input:    `{"field1": {"score": 3}, "field2": {"score": 2}, "field3": {`,
+			wantType: "object",
+		},
+		{
+			name:     "truncated object - judge response pattern",
+			input:    `{"plot": {"score": 3, "reasoning": "Good"}, "character": {"score": 2`,
+			wantType: "object",
+		},
+		{
+			name:     "object with trailing comma before truncation",
+			input:    `{"field1": "value1", "field2": "value2",`,
+			wantType: "object",
+		},
 	}
 
 	for _, tt := range tests {
@@ -143,6 +163,75 @@ func TestSanitizeJSON(t *testing.T) {
 			got := SanitizeJSON(tt.input)
 			if got != tt.want {
 				t.Errorf("SanitizeJSON() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCountUnmatchedBraces(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		openChar  rune
+		closeChar rune
+		want      int
+	}{
+		{
+			name:      "balanced braces",
+			input:     `{"key": "value"}`,
+			openChar:  '{',
+			closeChar: '}',
+			want:      0,
+		},
+		{
+			name:      "one unmatched opening brace",
+			input:     `{"key": "value"`,
+			openChar:  '{',
+			closeChar: '}',
+			want:      1,
+		},
+		{
+			name:      "two unmatched opening braces",
+			input:     `{"outer": {"inner": "value"`,
+			openChar:  '{',
+			closeChar: '}',
+			want:      2,
+		},
+		{
+			name:      "three unmatched opening braces",
+			input:     `{"a": {"b": {"c": "value"`,
+			openChar:  '{',
+			closeChar: '}',
+			want:      3,
+		},
+		{
+			name:      "braces in strings don't count",
+			input:     `{"key": "value with { and }"`,
+			openChar:  '{',
+			closeChar: '}',
+			want:      1,
+		},
+		{
+			name:      "escaped quotes handled correctly",
+			input:     `{"key": "value with \" quote"`,
+			openChar:  '{',
+			closeChar: '}',
+			want:      1,
+		},
+		{
+			name:      "array brackets",
+			input:     `["a", ["b", ["c"`,
+			openChar:  '[',
+			closeChar: ']',
+			want:      3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := countUnmatchedBraces(tt.input, tt.openChar, tt.closeChar)
+			if got != tt.want {
+				t.Errorf("countUnmatchedBraces() = %d, want %d\nInput: %s", got, tt.want, tt.input)
 			}
 		})
 	}
