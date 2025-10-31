@@ -142,7 +142,7 @@ This collection currently includes:
 
 - lemon07r/VellumK2-Fantasy-DPO-Tiny-01 - **A 128 row dataset that can be useful for testing or validation**
 - lemon07r/VellumK2-Fantasy-DPO-Small-01 - **A 1k row dataset that can be useful light training or in combination with other datasets**
-- lemon07r/VellumK2-Fantasy-DPO-01 (planned) - **A 10k row large dataset perfect for training with or without other datasets**
+- lemon07r/VellumK2-Fantasy-DPO-01 (planned) - **A 10k row dataset perfect for training with or without other datasets**
 
 These are all generated using Kimi-K2-0905 from Nvidia NIM API for topics, prompts, chosen responses and judge scoring. We use Phi-4-mini-instruct (Q6K from unsloth) run locally over llama.cpp server w/ ROCm (on a 6700 XT) for rejected responses. All of these datasets can be used for SFT just using prompt + chosen response columns, DPO using prompt + the chosen/rejected pairs, reward training using the score totals, and/or MORL training using the judge responses. See the dataset format section of the README.md further down below for more information. 
 
