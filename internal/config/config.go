@@ -8,10 +8,12 @@ import (
 
 // Config represents the complete application configuration
 type Config struct {
-	Generation      GenerationConfig       `toml:"generation"`
-	Models          map[string]ModelConfig `toml:"models"`
-	PromptTemplates PromptTemplates        `toml:"prompt_templates"`
-	HuggingFace     HuggingFaceConfig      `toml:"huggingface"`
+	Generation           GenerationConfig       `toml:"generation"`
+	Models               map[string]ModelConfig `toml:"models"`
+	PromptTemplates      PromptTemplates        `toml:"prompt_templates"`
+	HuggingFace          HuggingFaceConfig      `toml:"huggingface"`
+	ProviderRateLimits   map[string]int         `toml:"provider_rate_limits"`   // Global rate limits per provider (requests per minute)
+	ProviderBurstPercent int                    `toml:"provider_burst_percent"` // Burst capacity as percentage (1-50, default: 15)
 }
 
 // GenerationConfig holds generation-specific settings
@@ -41,10 +43,11 @@ type ModelConfig struct {
 	MaxOutputTokens      int     `toml:"max_output_tokens"`
 	ContextSize          int     `toml:"context_size"`
 	RateLimitPerMinute   int     `toml:"rate_limit_per_minute"`
-	MaxBackoffSeconds    int     `toml:"max_backoff_seconds"` // Optional: max backoff duration (default 120)
-	MaxRetries           int     `toml:"max_retries"`         // Optional: max retry attempts (default 3, 0 = unlimited)
-	UseJSONMode          bool    `toml:"use_json_mode"`       // Enable structured JSON output mode (optional)
-	Enabled              bool    `toml:"enabled"`             // Only used for judge model
+	MaxBackoffSeconds    int     `toml:"max_backoff_seconds"`             // Optional: max backoff duration (default 120)
+	MaxRetries           int     `toml:"max_retries"`                     // Optional: max retry attempts (default 3, 0 = unlimited)
+	JudgeTimeoutSeconds  int     `toml:"judge_timeout_seconds,omitempty"` // Timeout for judge API calls (default: 100s)
+	UseJSONMode          bool    `toml:"use_json_mode"`                   // Enable structured JSON output mode (optional)
+	Enabled              bool    `toml:"enabled"`                         // Only used for judge model
 }
 
 // PromptTemplates holds all customizable prompt templates
@@ -78,6 +81,15 @@ const (
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
+	// Set default provider burst percent if not specified
+	if c.ProviderBurstPercent == 0 {
+		c.ProviderBurstPercent = 15 // Default: 15% burst
+	}
+	// Validate provider burst percent range
+	if c.ProviderBurstPercent < 1 || c.ProviderBurstPercent > 50 {
+		return fmt.Errorf("provider_burst_percent must be between 1 and 50 (got %d)", c.ProviderBurstPercent)
+	}
+
 	// Validate generation config
 	if c.Generation.MainTopic == "" {
 		return fmt.Errorf("generation.main_topic is required")
@@ -190,7 +202,12 @@ func LoadSecrets() (*Secrets, error) {
 		APIKeys: make(map[string]string),
 	}
 
-	// Load common API keys
+	// Load generic API key (provider-agnostic)
+	if key := os.Getenv("API_KEY"); key != "" {
+		secrets.APIKeys["generic"] = key
+	}
+
+	// Load provider-specific API keys (optional, override generic)
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		secrets.APIKeys["openai"] = key
 	}
@@ -212,22 +229,54 @@ func LoadSecrets() (*Secrets, error) {
 
 // GetAPIKey returns the API key for a given base URL
 func (s *Secrets) GetAPIKey(baseURL string) string {
-	// Try to match common provider domains
+	// Try to match common provider domains (provider-specific keys)
 	if contains(baseURL, "openai.com") {
-		return s.APIKeys["openai"]
+		if key := s.APIKeys["openai"]; key != "" {
+			return key
+		}
 	}
 	if contains(baseURL, "nvidia.com") {
-		return s.APIKeys["nvidia"]
+		if key := s.APIKeys["nvidia"]; key != "" {
+			return key
+		}
 	}
 	if contains(baseURL, "anthropic.com") {
-		return s.APIKeys["anthropic"]
+		if key := s.APIKeys["anthropic"]; key != "" {
+			return key
+		}
 	}
 	if contains(baseURL, "together.xyz") || contains(baseURL, "together.ai") {
-		return s.APIKeys["together"]
+		if key := s.APIKeys["together"]; key != "" {
+			return key
+		}
 	}
 
-	// If no match, return empty (could be local server)
+	// Fall back to generic API_KEY for any OpenAI-compatible provider
+	if key := s.APIKeys["generic"]; key != "" {
+		return key
+	}
+
+	// If no key found, return empty (could be local server without auth)
 	return ""
+}
+
+// GetProviderName extracts a provider name from a base URL for rate limiting
+func GetProviderName(baseURL string) string {
+	// Match common provider domains
+	if contains(baseURL, "openai.com") {
+		return "openai"
+	}
+	if contains(baseURL, "nvidia.com") {
+		return "nvidia"
+	}
+	if contains(baseURL, "anthropic.com") {
+		return "anthropic"
+	}
+	if contains(baseURL, "together.xyz") || contains(baseURL, "together.ai") {
+		return "together"
+	}
+	// For localhost or unknown providers, use the full base URL as provider name
+	return baseURL
 }
 
 // contains checks if a string contains a substring

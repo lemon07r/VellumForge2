@@ -24,6 +24,11 @@ func NewSessionManager(logger *slog.Logger, resumeFromSession string) (*SessionM
 
 	var sessionDir string
 	if resumeFromSession != "" {
+		// SECURITY: Validate session path to prevent path traversal (CWE-22)
+		if err := ValidateSessionPath(resumeFromSession); err != nil {
+			return nil, fmt.Errorf("invalid resume session: %w", err)
+		}
+
 		// Resume mode: use existing session directory
 		sessionDir = filepath.Join(outputDir, resumeFromSession)
 		if _, err := os.Stat(sessionDir); os.IsNotExist(err) {

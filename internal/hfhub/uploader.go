@@ -32,10 +32,10 @@ const (
 // Uploader handles uploading datasets to Hugging Face Hub
 type Uploader struct {
 	token           string
-	httpClient      *http.Client      // For general operations
-	preuploadClient *http.Client      // For LFS preupload
-	lfsClient       *http.Client      // For LFS file uploads
-	commitClient    *http.Client      // For commit operations
+	httpClient      *http.Client // For general operations
+	preuploadClient *http.Client // For LFS preupload
+	lfsClient       *http.Client // For LFS file uploads
+	commitClient    *http.Client // For commit operations
 	logger          *slog.Logger
 }
 

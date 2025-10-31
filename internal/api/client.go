@@ -29,11 +29,13 @@ const (
 
 // Client handles HTTP requests to OpenAI-compatible API endpoints
 type Client struct {
-	httpClient      *http.Client
-	rateLimiterPool *RateLimiterPool
-	logger          *slog.Logger
-	maxRetries      int
-	baseRetryDelay  time.Duration
+	httpClient           *http.Client
+	rateLimiterPool      *RateLimiterPool
+	logger               *slog.Logger
+	maxRetries           int
+	baseRetryDelay       time.Duration
+	providerRateLimits   map[string]int // Provider-level rate limits (requests per minute)
+	providerBurstPercent int            // Burst capacity as percentage for provider limiters
 }
 
 // NewClient creates a new API client
@@ -42,10 +44,20 @@ func NewClient(logger *slog.Logger) *Client {
 		httpClient: &http.Client{
 			Timeout: DefaultHTTPTimeout,
 		},
-		rateLimiterPool: NewRateLimiterPool(),
-		logger:          logger,
-		maxRetries:      DefaultMaxRetries,
-		baseRetryDelay:  DefaultBaseRetryDelay,
+		rateLimiterPool:    NewRateLimiterPool(),
+		logger:             logger,
+		maxRetries:         DefaultMaxRetries,
+		baseRetryDelay:     DefaultBaseRetryDelay,
+		providerRateLimits: make(map[string]int),
+	}
+}
+
+// SetProviderRateLimits sets the global provider-level rate limits
+func (c *Client) SetProviderRateLimits(limits map[string]int, burstPercent int) {
+	c.providerRateLimits = limits
+	c.providerBurstPercent = burstPercent
+	if c.providerBurstPercent == 0 {
+		c.providerBurstPercent = 15 // Default: 15% burst
 	}
 }
 
@@ -61,13 +73,26 @@ func (c *Client) ChatCompletion(
 	apiKey string,
 	messages []Message,
 ) (*ChatCompletionResponse, error) {
+	requestStart := time.Now()
+
 	// Generate a unique model ID for rate limiting
 	modelID := fmt.Sprintf("%s:%s", modelCfg.BaseURL, modelCfg.ModelName)
 
-	// Wait for rate limiter
-	if err := c.rateLimiterPool.Wait(ctx, modelID, modelCfg.RateLimitPerMinute); err != nil {
+	// Get provider name and check for provider-level rate limit
+	providerName := config.GetProviderName(modelCfg.BaseURL)
+	providerRPM := 0
+	if c.providerRateLimits != nil {
+		if rpm, ok := c.providerRateLimits[providerName]; ok {
+			providerRPM = rpm
+		}
+	}
+
+	// Wait for rate limiter (provider-level if configured, otherwise model-level)
+	rateLimitStart := time.Now()
+	if err := c.rateLimiterPool.Wait(ctx, modelID, modelCfg.RateLimitPerMinute, providerName, providerRPM, c.providerBurstPercent); err != nil {
 		return nil, fmt.Errorf("rate limiter wait failed: %w", err)
 	}
+	rateLimitWait := time.Since(rateLimitStart)
 
 	// Construct request
 	req := ChatCompletionRequest{
@@ -92,7 +117,8 @@ func (c *Client) ChatCompletion(
 	if maxAttempts == 0 {
 		maxAttempts = c.maxRetries // Fallback to client default
 	}
-	
+
+	apiCallStart := time.Now()
 	for attempt := 0; maxAttempts < 0 || attempt <= maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Calculate backoff with jitter
@@ -131,6 +157,16 @@ func (c *Client) ChatCompletion(
 
 		resp, err := c.doRequest(ctx, modelCfg.BaseURL, apiKey, req)
 		if err == nil {
+			apiCallDuration := time.Since(apiCallStart)
+			totalDuration := time.Since(requestStart)
+
+			// Log performance metrics
+			c.logger.Debug("API request completed",
+				"model", modelCfg.ModelName,
+				"rate_limit_wait_ms", rateLimitWait.Milliseconds(),
+				"api_duration_ms", apiCallDuration.Milliseconds(),
+				"total_ms", totalDuration.Milliseconds())
+
 			// Check finish_reason for truncation
 			if len(resp.Choices) > 0 && resp.Choices[0].FinishReason == "length" {
 				c.logger.Warn("Response truncated due to max_tokens limit",
@@ -180,9 +216,12 @@ func (c *Client) doRequest(
 	apiKey string,
 	req ChatCompletionRequest,
 ) (*ChatCompletionResponse, error) {
-	// Marshal request body
-	body, err := json.Marshal(req)
-	if err != nil {
+	// Get buffer from pool for request body
+	buf := getBuffer()
+	defer putBuffer(buf)
+
+	// Encode request directly to buffer (avoids intermediate allocation)
+	if err := json.NewEncoder(buf).Encode(req); err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -193,7 +232,8 @@ func (c *Client) doRequest(
 	}
 	endpoint += "chat/completions"
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	// Use bytes.NewReader with the buffered data
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

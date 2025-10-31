@@ -170,6 +170,12 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	// Create API client
 	apiClient := api.NewClient(logger)
 
+	// Set provider-level rate limits if configured
+	if len(cfg.ProviderRateLimits) > 0 {
+		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits, cfg.ProviderBurstPercent)
+		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits, "burst_percent", cfg.ProviderBurstPercent)
+	}
+
 	// Set up checkpoint manager
 	var checkpointMgr *checkpoint.Manager
 
@@ -195,7 +201,8 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create dataset writer (append mode for resume)
-	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode)
+	expectedRecords := cfg.Generation.NumSubtopics * cfg.Generation.NumPromptsPerSubtopic
+	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
 	if err != nil {
 		return fmt.Errorf("failed to create dataset writer: %w", err)
 	}
@@ -422,6 +429,12 @@ func listCheckpoints(cmd *cobra.Command, args []string) error {
 // inspectCheckpoint displays detailed information about a checkpoint
 func inspectCheckpoint(cmd *cobra.Command, args []string) error {
 	sessionDir := args[0]
+
+	// SECURITY: Validate session path to prevent path traversal (CWE-22)
+	if err := writer.ValidateSessionPath(sessionDir); err != nil {
+		return fmt.Errorf("invalid session directory: %w", err)
+	}
+
 	fullPath := filepath.Join("output", sessionDir)
 
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
@@ -475,6 +488,12 @@ func inspectCheckpoint(cmd *cobra.Command, args []string) error {
 // resumeFromCheckpoint resumes generation from a checkpoint
 func resumeFromCheckpoint(cmd *cobra.Command, args []string) error {
 	sessionDir := args[0]
+
+	// SECURITY: Validate session path to prevent path traversal (CWE-22)
+	if err := writer.ValidateSessionPath(sessionDir); err != nil {
+		return fmt.Errorf("invalid session directory: %w", err)
+	}
+
 	fullPath := filepath.Join("output", sessionDir)
 
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
@@ -557,6 +576,12 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 	// Create API client
 	apiClient := api.NewClient(logger)
 
+	// Set provider-level rate limits if configured
+	if len(cfg.ProviderRateLimits) > 0 {
+		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits, cfg.ProviderBurstPercent)
+		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits, "burst_percent", cfg.ProviderBurstPercent)
+	}
+
 	// Set up checkpoint manager
 	var checkpointMgr *checkpoint.Manager
 
@@ -582,7 +607,8 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 	}
 
 	// Create dataset writer
-	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode)
+	expectedRecords := cfg.Generation.NumSubtopics * cfg.Generation.NumPromptsPerSubtopic
+	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
 	if err != nil {
 		return fmt.Errorf("failed to create dataset writer: %w", err)
 	}

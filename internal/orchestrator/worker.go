@@ -33,6 +33,7 @@ func (o *Orchestrator) worker(
 		default:
 		}
 
+		// Process job (judge runs async, no retries needed)
 		startTime := time.Now()
 		result := o.processJob(ctx, workerLogger, job)
 		result.Duration = time.Since(startTime)
@@ -48,11 +49,13 @@ func (o *Orchestrator) processJob(
 	logger *slog.Logger,
 	job models.GenerationJob,
 ) models.GenerationResult {
+	jobStartTime := time.Now()
 	result := models.GenerationResult{
 		Job: job,
 	}
 
 	// Generate chosen response (main model)
+	chosenStart := time.Now()
 	mainModel := o.cfg.Models["main"]
 	mainAPIKey := o.secrets.GetAPIKey(mainModel.BaseURL)
 
@@ -73,8 +76,10 @@ func (o *Orchestrator) processJob(
 		return result
 	}
 	result.Chosen = chosenResp.Choices[0].Message.Content
+	chosenDuration := time.Since(chosenStart)
 
 	// Generate rejected response (rejected model)
+	rejectedStart := time.Now()
 	rejectedModel := o.cfg.Models["rejected"]
 	rejectedAPIKey := o.secrets.GetAPIKey(rejectedModel.BaseURL)
 
@@ -95,19 +100,16 @@ func (o *Orchestrator) processJob(
 		return result
 	}
 	result.Rejected = rejectedResp.Choices[0].Message.Content
+	rejectedDuration := time.Since(rejectedStart)
 
-	// Optional: Run judge evaluation
-	if o.judgeModule != nil {
-		judgeResult, err := o.judgeModule.Evaluate(ctx, job.Prompt, result.Chosen, result.Rejected)
-		if err != nil {
-			logger.Warn("Judge evaluation failed",
-				"job_id", job.ID,
-				"error", err)
-			// Don't fail the entire result, just log the error
-		} else {
-			result.JudgeResult = judgeResult
-		}
-	}
+	totalDuration := time.Since(jobStartTime)
+
+	// Log detailed timing breakdown for benchmark analysis (judge runs async, not included)
+	logger.Info("Job processing breakdown",
+		"job_id", job.ID,
+		"chosen_ms", chosenDuration.Milliseconds(),
+		"rejected_ms", rejectedDuration.Milliseconds(),
+		"total_ms", totalDuration.Milliseconds())
 
 	return result
 }
@@ -124,7 +126,7 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 				"error", result.Error)
 			o.stats.FailureCount++
 		} else {
-			// Write to dataset
+			// Write to dataset (without judge results initially)
 			record := models.DatasetRecord{
 				MainTopic: result.Job.MainTopic,
 				SubTopic:  result.Job.SubTopic,
@@ -133,22 +135,22 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 				Rejected:  result.Rejected,
 			}
 
-			// Add judge results if available
-			if result.JudgeResult != nil {
-				record.ChosenScores = result.JudgeResult.ChosenScores
-				record.RejectedScores = result.JudgeResult.RejectedScores
-				record.ChosenScoreTotal = result.JudgeResult.ChosenScoreTotal
-				record.RejectedScoreTotal = result.JudgeResult.RejectedScoreTotal
-				record.PreferenceMargin = result.JudgeResult.PreferenceMargin
-			}
-
-			if err := o.dataWriter.WriteRecord(record); err != nil {
+			// Note: Judge results will be added asynchronously via background goroutines
+			// WriteRecord now returns the record index for later updates
+			recordIndex, err := o.dataWriter.WriteRecord(record)
+			if err != nil {
 				o.logger.Error("Failed to write record",
 					"job_id", result.Job.ID,
 					"error", err)
 				o.stats.FailureCount++
 			} else {
 				o.stats.SuccessCount++
+
+				// Spawn background judge goroutine (non-blocking!)
+				if o.judgeModule != nil {
+					o.pendingJudges.Add(1)
+					go o.evaluateJudgeAsync(recordIndex, result.Job.Prompt, result.Chosen, result.Rejected)
+				}
 
 				// Checkpoint progress (interval-based)
 				if o.checkpointMgr != nil {
@@ -160,5 +162,66 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 		}
 
 		_ = bar.Add(1)
+	}
+}
+
+// judgeUpdater runs in a background goroutine and processes judge result updates
+func (o *Orchestrator) judgeUpdater(ctx context.Context) {
+	for {
+		select {
+		case update, ok := <-o.judgeUpdates:
+			if !ok {
+				// Channel closed, updater shutting down
+				return
+			}
+
+			// Update the record with judge results
+			err := o.dataWriter.UpdateRecord(update.recordIndex, update.judgeResult)
+			if err != nil {
+				o.logger.Error("Failed to update record with judge results",
+					"record_index", update.recordIndex,
+					"error", err)
+			} else {
+				o.logger.Debug("Updated record with judge results",
+					"record_index", update.recordIndex)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// evaluateJudgeAsync evaluates judge in background (non-blocking for workers)
+// This function spawns as a goroutine and runs independently
+func (o *Orchestrator) evaluateJudgeAsync(recordIndex int, prompt, chosen, rejected string) {
+	defer o.pendingJudges.Done()
+
+	// Acquire semaphore slot to limit concurrent judge goroutines
+	o.judgeSemaphore <- struct{}{}
+	defer func() { <-o.judgeSemaphore }()
+
+	// Create context with timeout for judge evaluation
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	// Evaluate (this blocks for 70-103s, but doesn't block workers!)
+	judgeResult, err := o.judgeModule.Evaluate(ctx, prompt, chosen, rejected)
+	if err != nil {
+		o.logger.Warn("Background judge evaluation failed",
+			"record_index", recordIndex,
+			"error", err)
+		return
+	}
+
+	// Send update to updater goroutine
+	select {
+	case o.judgeUpdates <- judgeUpdate{
+		recordIndex: recordIndex,
+		judgeResult: judgeResult,
+	}:
+		// Update queued successfully
+	case <-ctx.Done():
+		o.logger.Warn("Judge update dropped due to context cancellation",
+			"record_index", recordIndex)
 	}
 }

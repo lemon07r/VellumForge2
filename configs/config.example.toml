@@ -1,6 +1,22 @@
 # VellumForge2 Configuration Example
 # This file demonstrates all available configuration options
 
+# Global provider-level rate limits (optional)
+# These override individual model rate limits for all models using the same provider
+# Useful when a provider has a global API rate limit that applies across all models
+[provider_rate_limits]
+# nvidia = 40  # All NVIDIA models share this limit
+# openai = 500
+# anthropic = 200
+# together = 100
+
+# Provider burst capacity as percentage (1-50, default: 15)
+# Controls how many simultaneous requests can exceed the steady-state rate
+# Higher burst (20-25%) improves throughput with many workers (64+) but may cause occasional rate limit errors
+# Lower burst (10-12%) reduces rate limit errors but may throttle throughput with high concurrency
+# Recommended: 15% for balanced performance, 20%+ for maximum throughput with 64+ workers
+# provider_burst_percent = 15
+
 [generation]
 # The main theme/topic for dataset generation
 main_topic = "Fantasy Fiction"
@@ -20,9 +36,13 @@ subtopic_chunk_size = 30
 num_prompts_per_subtopic = 4
 
 # Number of concurrent workers for generating preference pairs
-# Recommended: 4-16 depending on API rate limits
+# Benchmark results (32 jobs, NVIDIA NIM + local model, 40 RPM provider limit):
+#   16 workers: 7.06/min   |  32 workers: 7.57/min   |  64 workers: 11.91/min
+#   96 workers: 14.79/min  | 256 workers: 17.60/min (fastest)
+# Recommended: 64-256 for maximum throughput with provider rate limiting
+# Use higher values (128-256) when local model is fast and provider limits are configured
 # Range: 1-1024 (can be increased with disable_validation_limits)
-concurrency = 8
+concurrency = 64
 
 # Over-generation buffer for subtopic/prompt generation (0.0-1.0)
 # Default: 0.15 (15% extra requested, then deduplicated and trimmed)

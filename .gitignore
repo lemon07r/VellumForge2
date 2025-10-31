@@ -38,6 +38,7 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+*.benchmark_backup
 
 # Test Report Folder
 REPORTS/

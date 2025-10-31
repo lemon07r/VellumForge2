@@ -19,6 +19,19 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+const (
+	// judgeUpdateBufferSize is the channel buffer size for async judge result updates.
+	// This provides backpressure to prevent unbounded memory growth while allowing
+	// judge operations to complete asynchronously without blocking workers.
+	judgeUpdateBufferSize = 100
+)
+
+// judgeUpdate represents an async judge result update
+type judgeUpdate struct {
+	recordIndex int
+	judgeResult *models.JudgeResult
+}
+
 // Orchestrator manages the entire data generation pipeline
 type Orchestrator struct {
 	cfg           *config.Config
@@ -30,6 +43,10 @@ type Orchestrator struct {
 	stats         *models.SessionStats
 	checkpointMgr *checkpoint.Manager
 	resumeMode    bool
+	// Non-blocking judge support
+	judgeUpdates   chan judgeUpdate
+	pendingJudges  sync.WaitGroup
+	judgeSemaphore chan struct{} // Limit concurrent judge goroutines
 }
 
 // New creates a new orchestrator
@@ -59,7 +76,7 @@ func New(
 		stats.StartTime = time.Now()
 	}
 
-	return &Orchestrator{
+	o := &Orchestrator{
 		cfg:           cfg,
 		secrets:       secrets,
 		apiClient:     apiClient,
@@ -70,15 +87,36 @@ func New(
 		checkpointMgr: checkpointMgr,
 		resumeMode:    resumeMode,
 	}
+
+	// Initialize non-blocking judge support if judge is enabled
+	if judgeModule != nil {
+		o.judgeUpdates = make(chan judgeUpdate, judgeUpdateBufferSize)
+		// Judge semaphore scales with main concurrency to prevent bottleneck
+		o.judgeSemaphore = make(chan struct{}, cfg.Generation.Concurrency)
+	}
+
+	return o
 }
 
 // Run executes the complete generation pipeline
 func (o *Orchestrator) Run(ctx context.Context) error {
+	var checkpointCloseErr error
+
 	defer func() {
 		// Ensure checkpoint manager is properly closed
 		if o.checkpointMgr != nil {
+			// First, try to save final checkpoint synchronously
+			if err := o.checkpointMgr.SaveSync(); err != nil {
+				o.logger.Error("Failed to save final checkpoint", "error", err)
+				checkpointCloseErr = err
+			}
+
+			// Then close the manager
 			if err := o.checkpointMgr.Close(); err != nil {
 				o.logger.Error("Failed to close checkpoint manager", "error", err)
+				if checkpointCloseErr == nil {
+					checkpointCloseErr = err
+				}
 			}
 		}
 	}()
@@ -187,8 +225,23 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			"progress", fmt.Sprintf("%.1f%%", checkpoint.GetProgressPercentage(cp)))
 	}
 
+	// Start judge updater goroutine if judge is enabled
+	updaterCtx, cancelUpdater := context.WithCancel(ctx)
+	defer cancelUpdater()
+	if o.judgeModule != nil {
+		go o.judgeUpdater(updaterCtx)
+	}
+
 	if err := o.generatePreferencePairs(ctx, pendingJobs); err != nil {
 		return fmt.Errorf("failed to generate preference pairs: %w", err)
+	}
+
+	// Wait for all pending background judges to complete
+	if o.judgeModule != nil {
+		o.logger.Info("Waiting for background judge evaluations to complete...")
+		o.pendingJudges.Wait()
+		close(o.judgeUpdates)
+		o.logger.Info("All background judge evaluations complete")
 	}
 
 	// Finalize stats
@@ -218,6 +271,11 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		o.logger.Warn("Generation completed with failures",
 			"failure_rate", fmt.Sprintf("%.2f%%", failureRate),
 			"lost_rows", o.stats.FailureCount)
+	}
+
+	// Check for checkpoint save/close errors before returning
+	if checkpointCloseErr != nil {
+		return fmt.Errorf("checkpoint save failed during shutdown: %w", checkpointCloseErr)
 	}
 
 	return nil
@@ -439,98 +497,168 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 }
 
 func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) ([]models.GenerationJob, error) {
-	o.logger.Info("Generating prompts for all subtopics...")
+	o.logger.Info("Generating prompts for all subtopics with parallel workers...", "total_subtopics", len(subtopics), "concurrency", o.cfg.Generation.Concurrency)
 
+	// Use worker pool for parallel prompt generation
+	type subtopicTask struct {
+		subtopic string
+		index    int
+	}
+
+	type promptResult struct {
+		index    int
+		subtopic string
+		prompts  []string
+		err      error
+	}
+
+	tasksChan := make(chan subtopicTask, len(subtopics))
+	resultsChan := make(chan promptResult, len(subtopics))
+
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < o.cfg.Generation.Concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for task := range tasksChan {
+				prompts, err := o.generatePromptsForSubtopic(ctx, task.subtopic)
+				resultsChan <- promptResult{
+					index:    task.index,
+					subtopic: task.subtopic,
+					prompts:  prompts,
+					err:      err,
+				}
+			}
+		}(i)
+	}
+
+	// Send tasks
+	for i, subtopic := range subtopics {
+		tasksChan <- subtopicTask{subtopic: subtopic, index: i}
+	}
+	close(tasksChan)
+
+	// Wait for workers
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Collect results
+	results := make(map[int]promptResult)
+	bar := progressbar.Default(int64(len(subtopics)), "Generating prompts")
+
+	for result := range resultsChan {
+		results[result.index] = result
+		_ = bar.Add(1)
+
+		if result.err != nil {
+			o.logger.Error("Failed to generate prompts for subtopic",
+				"subtopic", result.subtopic,
+				"error", result.err)
+		}
+	}
+
+	// Build jobs in order
 	var allJobs []models.GenerationJob
 	jobID := 0
 
-	bar := progressbar.Default(int64(len(subtopics)), "Generating prompts")
-
-	for _, subtopic := range subtopics {
-		// Render template
-		prompt, err := util.RenderTemplate(o.cfg.PromptTemplates.PromptGeneration, map[string]interface{}{
-			"SubTopic":   subtopic,
-			"NumPrompts": o.cfg.Generation.NumPromptsPerSubtopic,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to render prompt template: %w", err)
-		}
-
-		// Call API
-		mainModel := o.cfg.Models["main"]
-		apiKey := o.secrets.GetAPIKey(mainModel.BaseURL)
-
-		resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, []api.Message{
-			{Role: "user", Content: prompt},
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		// Parse JSON response
-		content := resp.Choices[0].Message.Content
-
-		o.logger.Debug("Received prompts response", "subtopic", subtopic, "length", len(content))
-
-		// Extract JSON from potential markdown code blocks
-		jsonStr := extractJSON(content)
-
-		o.logger.Debug("Extracted JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
-
-		// Repair common JSON issues from LLM responses
-		jsonStr = util.RepairJSON(jsonStr)
-		o.logger.Debug("Repaired JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
-
-		// Try validation first (advisory)
-		valid, elemCount, err := ValidateJSONArray(jsonStr)
-		if valid {
-			o.logger.Debug("Prompts JSON validated successfully", "subtopic", subtopic, "element_count", elemCount)
-		} else {
-			o.logger.Warn("JSON validation failed for prompts, attempting unmarshal anyway",
-				"error", err,
-				"subtopic", subtopic,
-				"extracted_json", util.TruncateString(jsonStr, 200))
-		}
-
-		// Attempt unmarshal with validation (with fallback to basic unmarshal)
-		prompts, actualCount, err := ValidateStringArray(jsonStr, 1)
-		if err != nil {
-			// Fallback: try basic unmarshal (old behavior)
-			o.logger.Warn("ValidateStringArray failed for prompts, trying basic unmarshal",
-				"error", err,
-				"subtopic", subtopic)
-			var basicPrompts []string
-			if unmarshalErr := json.Unmarshal([]byte(jsonStr), &basicPrompts); unmarshalErr != nil {
-				o.logger.Error("Both validation and basic unmarshal failed for prompts",
-					"validation_error", err,
-					"unmarshal_error", unmarshalErr,
-					"subtopic", subtopic,
-					"extracted_json", util.TruncateString(jsonStr, 200),
-					"original_response", util.TruncateString(content, 200))
-				return nil, fmt.Errorf("failed to parse prompts for subtopic %q: %w (unmarshal also failed: %v)", subtopic, err, unmarshalErr)
+	for i := 0; i < len(subtopics); i++ {
+		result, ok := results[i]
+		if !ok || result.err != nil {
+			if ok {
+				return nil, fmt.Errorf("failed to generate prompts for subtopic %q: %w", result.subtopic, result.err)
 			}
-			prompts = basicPrompts
-			actualCount = len(basicPrompts)
-			o.logger.Info("Basic unmarshal succeeded for prompts", "subtopic", subtopic, "count", actualCount)
-		} else {
-			o.logger.Debug("Prompts parsed successfully", "subtopic", subtopic, "count", actualCount)
+			return nil, fmt.Errorf("missing result for subtopic at index %d", i)
 		}
 
-		// Create jobs
-		for _, p := range prompts {
+		for _, p := range result.prompts {
 			allJobs = append(allJobs, models.GenerationJob{
 				ID:        jobID,
 				MainTopic: o.cfg.Generation.MainTopic,
-				SubTopic:  subtopic,
+				SubTopic:  result.subtopic,
 				Prompt:    p,
 			})
 			jobID++
 		}
-
-		_ = bar.Add(1)
 	}
 
 	return allJobs, nil
+}
+
+// generatePromptsForSubtopic generates prompts for a single subtopic
+func (o *Orchestrator) generatePromptsForSubtopic(ctx context.Context, subtopic string) ([]string, error) {
+	// Render template
+	prompt, err := util.RenderTemplate(o.cfg.PromptTemplates.PromptGeneration, map[string]interface{}{
+		"SubTopic":   subtopic,
+		"NumPrompts": o.cfg.Generation.NumPromptsPerSubtopic,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to render prompt template: %w", err)
+	}
+
+	// Call API
+	mainModel := o.cfg.Models["main"]
+	apiKey := o.secrets.GetAPIKey(mainModel.BaseURL)
+
+	resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, []api.Message{
+		{Role: "user", Content: prompt},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse JSON response
+	content := resp.Choices[0].Message.Content
+
+	o.logger.Debug("Received prompts response", "subtopic", subtopic, "length", len(content))
+
+	// Extract JSON from potential markdown code blocks
+	jsonStr := extractJSON(content)
+
+	o.logger.Debug("Extracted JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
+
+	// Repair common JSON issues from LLM responses
+	jsonStr = util.RepairJSON(jsonStr)
+	o.logger.Debug("Repaired JSON", "length", len(jsonStr), "first_100_chars", util.TruncateString(jsonStr, 100))
+
+	// Try validation first (advisory)
+	valid, elemCount, err := ValidateJSONArray(jsonStr)
+	if valid {
+		o.logger.Debug("Prompts JSON validated successfully", "subtopic", subtopic, "element_count", elemCount)
+	} else {
+		o.logger.Warn("JSON validation failed for prompts, attempting unmarshal anyway",
+			"error", err,
+			"subtopic", subtopic,
+			"extracted_json", util.TruncateString(jsonStr, 200))
+	}
+
+	// Attempt unmarshal with validation (with fallback to basic unmarshal)
+	prompts, actualCount, err := ValidateStringArray(jsonStr, 1)
+	if err != nil {
+		// Fallback: try basic unmarshal (old behavior)
+		o.logger.Warn("ValidateStringArray failed for prompts, trying basic unmarshal",
+			"error", err,
+			"subtopic", subtopic)
+		var basicPrompts []string
+		if unmarshalErr := json.Unmarshal([]byte(jsonStr), &basicPrompts); unmarshalErr != nil {
+			o.logger.Error("Both validation and basic unmarshal failed for prompts",
+				"validation_error", err,
+				"unmarshal_error", unmarshalErr,
+				"subtopic", subtopic,
+				"extracted_json", util.TruncateString(jsonStr, 200),
+				"original_response", util.TruncateString(content, 200))
+			return nil, fmt.Errorf("failed to parse prompts for subtopic %q: %w (unmarshal also failed: %v)", subtopic, err, unmarshalErr)
+		}
+		prompts = basicPrompts
+		actualCount = len(basicPrompts)
+		o.logger.Info("Basic unmarshal succeeded for prompts", "subtopic", subtopic, "count", actualCount)
+	} else {
+		o.logger.Debug("Prompts parsed successfully", "subtopic", subtopic, "count", actualCount)
+	}
+
+	return prompts, nil
 }
 
 func (o *Orchestrator) generatePreferencePairs(ctx context.Context, jobs []models.GenerationJob) error {

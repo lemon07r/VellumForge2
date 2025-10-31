@@ -110,41 +110,92 @@ func TestLoadSecrets(t *testing.T) {
 }
 
 func TestGetAPIKey(t *testing.T) {
-	secrets := &Secrets{
-		APIKeys: map[string]string{
-			"openai": "openai-key",
-			"nvidia": "nvidia-key",
-		},
-	}
+	t.Run("provider_specific_keys", func(t *testing.T) {
+		secrets := &Secrets{
+			APIKeys: map[string]string{
+				"openai": "openai-key",
+				"nvidia": "nvidia-key",
+			},
+		}
 
-	tests := []struct {
-		name    string
-		baseURL string
-		want    string
-	}{
-		{
-			name:    "OpenAI URL",
-			baseURL: "https://api.openai.com/v1",
-			want:    "openai-key",
-		},
-		{
-			name:    "NVIDIA URL",
-			baseURL: "https://integrate.api.nvidia.com/v1",
-			want:    "nvidia-key",
-		},
-		{
-			name:    "Unknown URL",
-			baseURL: "https://unknown.com/v1",
-			want:    "",
-		},
-	}
+		tests := []struct {
+			name    string
+			baseURL string
+			want    string
+		}{
+			{
+				name:    "OpenAI URL",
+				baseURL: "https://api.openai.com/v1",
+				want:    "openai-key",
+			},
+			{
+				name:    "NVIDIA URL",
+				baseURL: "https://integrate.api.nvidia.com/v1",
+				want:    "nvidia-key",
+			},
+			{
+				name:    "Unknown URL",
+				baseURL: "https://unknown.com/v1",
+				want:    "",
+			},
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := secrets.GetAPIKey(tt.baseURL)
-			if got != tt.want {
-				t.Errorf("GetAPIKey() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got := secrets.GetAPIKey(tt.baseURL)
+				if got != tt.want {
+					t.Errorf("GetAPIKey() = %v, want %v", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("generic_key_fallback", func(t *testing.T) {
+		secrets := &Secrets{
+			APIKeys: map[string]string{
+				"generic": "generic-key",
+			},
+		}
+
+		tests := []struct {
+			name    string
+			baseURL string
+			want    string
+		}{
+			{
+				name:    "Nebius URL uses generic key",
+				baseURL: "https://api.studio.nebius.com/v1/",
+				want:    "generic-key",
+			},
+			{
+				name:    "Any OpenAI-compatible provider uses generic key",
+				baseURL: "https://my-custom-llm.example.com/v1",
+				want:    "generic-key",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got := secrets.GetAPIKey(tt.baseURL)
+				if got != tt.want {
+					t.Errorf("GetAPIKey() = %v, want %v", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("provider_specific_overrides_generic", func(t *testing.T) {
+		secrets := &Secrets{
+			APIKeys: map[string]string{
+				"generic": "generic-key",
+				"openai":  "openai-specific-key",
+			},
+		}
+
+		got := secrets.GetAPIKey("https://api.openai.com/v1")
+		want := "openai-specific-key"
+		if got != want {
+			t.Errorf("GetAPIKey() = %v, want %v (provider-specific should override generic)", got, want)
+		}
+	})
 }

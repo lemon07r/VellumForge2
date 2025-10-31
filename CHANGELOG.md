@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.11] - 2025-10-31
+
+### Fixed
+- **Critical Performance Regression**: Eliminated 80% performance regression in judge evaluation
+  - **Root Cause**: API retry loop was making up to 3 API calls per parse failure instead of trying different parse strategies locally
+  - **Solution**: Refactored to separate API retries from JSON parse retries
+    - Single API call per judge evaluation (no retry loop)
+    - Multi-strategy progressive JSON parsing on same response (4 strategies, <4ms total)
+  - **Performance Improvement**:
+    - Average job time: 9.1s → 5.2s (**-42.6%** faster)
+    - Total session time: 292s → 167s (**-42.7%** faster)  
+    - API cost reduction: **-60%** for judge evaluations
+  - **Reliability**: Parse success rate maintained at 100% with Strategy 1 (standard extraction + sanitization)
+  - **Implementation Details**:
+    - Added `parseJudgeResponseWithRetries()`: Progressive 4-strategy parser
+      - Strategy 1 (standard): ExtractJSON → SanitizeJSON → Unmarshal
+      - Strategy 2 (aggressive): ExtractJSON → RepairJSON → Unmarshal
+      - Strategy 3 (multi-pass): Extract → Repair → Sanitize → Repair → Unmarshal
+      - Strategy 4 (partial recovery): Lenient decoder for incomplete JSON
+    - Removed obsolete `maxParseRetries`, `parseRetryDelay`, and `isJSONParseError()` function
+    - Fixed linter warnings (ineffectual assignments)
+- **JSON Parse Resilience**: Backup strategies available for edge cases without API overhead
+
+### Changed
+- Judge evaluation now makes exactly 1 API call per response (previously up to 3 on parse failure)
+- Parse errors now trigger local repair strategies instead of API retries
+- Removed artificial delays between parse attempts (was 1 second per retry)
+
+### Performance
+- **124.5 seconds saved** per 32-job session (from 291.9s to 167.4s)
+- Zero API retry overhead for parse failures
+- All parse attempts succeed with Strategy 1 (100% fast-path success)
+- Time saved scales linearly with dataset size
+
+### Documentation
+- Created `REPORTS/PERFORMANCE_REGRESSION_ANALYSIS_2025-10-31.md`: Root cause analysis
+- Created `REPORTS/PERFORMANCE_FIX_IMPLEMENTATION_2025-10-31.md`: Implementation details
+- Created `REPORTS/POST_FIX_SESSION_ANALYSIS_2025-10-31.md`: Real-world validation results
+- Created `REPORTS/SESSION_COMPARISON_CLARIFICATION_2025-10-31.md`: Performance comparison methodology
+
+---
+
+## [1.4.4] - 2025-10-30
+
+### Added
+- **Provider-Based Global Rate Limiting**: Major feature to prevent rate limit errors across multiple models sharing the same provider
+  - `provider_rate_limits` configuration: Set global RPM limits per provider (nvidia, openai, anthropic, together, etc.)
+  - Automatic provider detection from base URLs
+  - Provider-level rate limiters override individual model limits
+  - Prevents burst overages when multiple models share the same API endpoint
+- **Configurable Burst Capacity**: Fine-tune rate limiter burst behavior
+  - `provider_burst_percent` configuration (1-50%, default: 15%)
+  - Higher burst (20-25%) improves throughput with 64+ workers
+  - Lower burst (10-12%) reduces rate limit errors
+  - Model-level limiters still use 20% burst (unchanged)
+- **Performance Logging**: Added detailed API request and job processing metrics
+  - `rate_limit_wait_ms`: Time spent waiting for rate limiter token
+  - `api_duration_ms`: Actual LLM API call duration  
+  - `total_ms`: End-to-end request time
+  - Per-job breakdown: `chosen_ms`, `rejected_ms`, `judge_ms`, `total_ms`
+- **Asynchronous Judge Evaluation**: Judge runs in background, non-blocking
+  - Jobs complete immediately after chosen/rejected generation
+  - Judge evaluation happens asynchronously
+  - Reduces perceived job duration by ~30-50%
+- **Benchmarking Scripts**: Comprehensive tools for performance testing
+  - `scripts/benchmark_workers.sh`: Test multiple worker counts (4, 8, 16, 32, 64, 96, 128, 256)
+  - `scripts/quick_benchmark.sh`: Quick 3-point benchmark
+  - Automatic results aggregation with CSV export
+  - Performance metrics: throughput, avg job time, rate wait, blocking %
+- **BENCHMARK_README.md**: Complete guide for running performance tests
+
+### Changed
+- **Concurrency Recommendations Updated**: Based on actual benchmark data
+  - Old recommendation: 4-16 workers
+  - New recommendation: **64-256 workers** for maximum throughput
+  - Benchmark results (32 jobs, NVIDIA NIM + local Phi-4):
+    - 16 workers: 7.06/min | 32 workers: 7.57/min | 64 workers: 11.91/min
+    - 96 workers: 14.79/min | **256 workers: 17.60/min** (2.5x faster than old recommendation)
+- Worker pool scales much better with provider rate limiting
+- Updated all configuration examples with realistic worker counts
+- Enhanced logging to show provider rate limit configuration at startup
+
+### Fixed
+- Multiple models using same provider no longer create duplicate rate limiters
+- Rate limit errors reduced when using shared provider endpoints (main + judge on same API)
+- Unnecessary nil checks removed from map length checks (Go best practices)
+
+### Performance
+- **2.5x throughput improvement** with high worker counts (256 workers vs 16 workers)
+- Provider rate limiting prevents 429 errors while maintaining high throughput
+- Async judge evaluation reduces job completion time perception
+- Better utilization of available API quota with provider-level coordination
+
+### Documentation
+- Updated concurrency recommendations in README.md, GETTING_STARTED.md, config.toml, config.example.toml
+- Added provider rate limiting configuration examples
+- Added burst capacity tuning guidelines
+- Added benchmark data to support higher worker count recommendations
+
+---
+
 ## [1.3.7] - 2025-10-29
 
 ### Added
@@ -276,7 +377,8 @@ Initial stable release of VellumForge2.
 
 | Version | Date | Key Features |
 |---------|------|--------------|
-| **Unreleased** | 2025-10-29 | Auto .gitattributes, newline rendering fix |
+| **1.4.11** | 2025-10-31 | **Critical performance fix**: Eliminated 80% regression, 42% faster judge evaluation |
+| **1.4.4** | 2025-10-30 | Provider rate limiting, configurable burst, async judge, benchmarking |
 | **1.3.7** | 2025-10-29 | Retry logic, timeout optimization, JSON sanitization, schema fix |
 | **1.3.4** | 2025-10-28 | Configurable retries |
 | **1.3.2** | 2025-10-28 | Version bump, minor fixes |
