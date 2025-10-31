@@ -4,6 +4,13 @@
 
 ## Key Features
 
+### **Multiple Dataset Modes**
+- **SFT Mode**: Simple instruction-output pairs for supervised fine-tuning
+- **DPO Mode**: Standard preference pairs (prompt, chosen, rejected) - HuggingFace TRL compatible
+- **KTO Mode**: Unpaired preferences with binary labels - KTOTrainer compatible  
+- **MO-DPO Mode**: Full multi-objective DPO with judge scoring for advanced training
+- **Optional Judge Filtering**: Quality control for all modes with configurable thresholds
+
 ### **Hierarchical Generation Pipeline**
 - Generate subtopics from a main theme
 - Create diverse prompts for each subtopic
@@ -96,8 +103,21 @@ Also check out the [Getting Started Guide](GETTING_STARTED.md)
 ### 1. Set Up Configuration
 
 ```bash
-# Copy example files
+# Copy example config based on your training method:
+
+# For MO-DPO (default - full features with judge scoring)
 cp configs/config.example.toml config.toml
+
+# For SFT (simple instruction-output pairs)
+cp configs/config.sft.example.toml config.toml
+
+# For DPO (standard preference pairs)
+cp configs/config.dpo.example.toml config.toml
+
+# For KTO (unpaired preferences with labels)
+cp configs/config.kto.example.toml config.toml
+
+# Set up API keys
 cp configs/.env.example .env
 
 # Edit config.toml with your desired settings
@@ -166,6 +186,17 @@ over_generation_buffer = 0.15  # Request 15% extra to hit target counts
 max_exclusion_list_size = 50  # Limit retry prompt size
 # disable_validation_limits = false  # Set true to exceed default limits
 
+# Dataset mode: Controls output format
+dataset_mode = "mo-dpo"  # Options: "sft", "dpo", "kto", "mo-dpo"
+include_topic_columns = true  # For SFT mode: include main_topic/sub_topic
+
+# Optional judge-based filtering (all modes except mo-dpo)
+[judge_filtering]
+enabled = false           # Enable quality filtering
+use_explanations = false  # Skip reasoning to save tokens
+min_chosen_score = 4.0    # Minimum score for chosen responses
+max_rejected_score = 3.0  # Maximum score for rejected responses
+
 [models.main]
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "moonshotai/kimi-k2-instruct-0905"
@@ -221,16 +252,60 @@ OPENAI_API_KEY=sk-xxxxx
 HUGGING_FACE_TOKEN=hf_xxxxx
 ```
 
-## Dataset Format
+## Dataset Formats
 
-### One-to-Many Hybrid Schema
+VellumForge2 supports four dataset modes to match your training requirements:
 
-VellumForge2 uses a flexible "one-to-many" hybrid schema that works seamlessly with:
+### Mode Comparison
+
+| Mode | Format | Columns | Use Case | Judge | Model Requirements |
+|------|--------|---------|----------|-------|-------------------|
+| **SFT** | Instruction-output | `instruction`, `output` | Supervised fine-tuning | Optional (filtering) | Main only |
+| **DPO** | Preference pairs | `prompt`, `chosen`, `rejected` | Standard DPO training | Optional (filtering) | Main + Rejected |
+| **KTO** | Unpaired preferences | `prompt`, `completion`, `label` | KTO training | Optional (filtering) | Main + Rejected |
+| **MO-DPO** | Multi-objective | Full schema with scores | Advanced MORL | Required | Main + Rejected + Judge |
+
+### SFT Mode Format
+```json
+{
+  "main_topic": "Fantasy Fiction",     // Optional
+  "sub_topic": "Dragon Lore",          // Optional
+  "instruction": "Write a story...",
+  "output": "Story text..."
+}
+```
+
+### DPO Mode Format (HuggingFace TRL Compatible)
+```json
+{
+  "prompt": "Write a story...",
+  "chosen": "Better story...",
+  "rejected": "Worse story..."
+}
+```
+
+### KTO Mode Format (HuggingFace TRL Compatible)
+```json
+// Chosen response row
+{
+  "prompt": "Write a story...",
+  "completion": "Better story...",
+  "label": true
+}
+// Rejected response row
+{
+  "prompt": "Write a story...",
+  "completion": "Worse story...",
+  "label": false
+}
+```
+
+### MO-DPO Mode Format (One-to-Many Hybrid Schema)
+
+VellumForge2's advanced mode uses a flexible "one-to-many" hybrid schema that works seamlessly with:
 - **DPOTrainer**: Use `prompt`, `chosen`, `rejected` columns
 - **RewardTrainer**: Use texts with `chosen_score_total` and `rejected_score_total` as labels
 - **Custom MORL Training**: Parse nested `chosen_scores` and `rejected_scores` for multi-objective training
-
-Using a judge is optional, generate datasets without a judge for DPO only training. Use without rejected responses for SFT training.
 
 Each line in `dataset.jsonl` is a JSON object:
 

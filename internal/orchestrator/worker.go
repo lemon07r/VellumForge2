@@ -78,29 +78,37 @@ func (o *Orchestrator) processJob(
 	result.Chosen = chosenResp.Choices[0].Message.Content
 	chosenDuration := time.Since(chosenStart)
 
-	// Generate rejected response (rejected model)
-	rejectedStart := time.Now()
-	rejectedModel := o.cfg.Models["rejected"]
-	rejectedAPIKey := o.secrets.GetAPIKey(rejectedModel.BaseURL)
+	// Generate rejected response (skip for SFT mode if model not configured)
+	var rejectedDuration time.Duration
+	rejectedModel, hasRejectedModel := o.cfg.Models["rejected"]
 
-	// Render rejected generation prompt
-	rejectedPrompt, err := util.RenderTemplate(o.cfg.PromptTemplates.RejectedGeneration, map[string]interface{}{
-		"Prompt": job.Prompt,
-	})
-	if err != nil {
-		result.Error = fmt.Errorf("failed to render rejected template: %w", err)
-		return result
-	}
+	if hasRejectedModel {
+		rejectedStart := time.Now()
+		rejectedAPIKey := o.secrets.GetAPIKey(rejectedModel.BaseURL)
 
-	rejectedResp, err := o.apiClient.ChatCompletion(ctx, rejectedModel, rejectedAPIKey, []api.Message{
-		{Role: "user", Content: rejectedPrompt},
-	})
-	if err != nil {
-		result.Error = fmt.Errorf("failed to generate rejected response: %w", err)
-		return result
+		// Render rejected generation prompt
+		rejectedPrompt, err := util.RenderTemplate(o.cfg.PromptTemplates.RejectedGeneration, map[string]interface{}{
+			"Prompt": job.Prompt,
+		})
+		if err != nil {
+			result.Error = fmt.Errorf("failed to render rejected template: %w", err)
+			return result
+		}
+
+		rejectedResp, err := o.apiClient.ChatCompletion(ctx, rejectedModel, rejectedAPIKey, []api.Message{
+			{Role: "user", Content: rejectedPrompt},
+		})
+		if err != nil {
+			result.Error = fmt.Errorf("failed to generate rejected response: %w", err)
+			return result
+		}
+		result.Rejected = rejectedResp.Choices[0].Message.Content
+		rejectedDuration = time.Since(rejectedStart)
+	} else {
+		// SFT mode without rejected model
+		result.Rejected = ""
+		rejectedDuration = 0
 	}
-	result.Rejected = rejectedResp.Choices[0].Message.Content
-	rejectedDuration := time.Since(rejectedStart)
 
 	totalDuration := time.Since(jobStartTime)
 
@@ -126,36 +134,34 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 				"error", result.Error)
 			o.stats.FailureCount++
 		} else {
-			// Write to dataset (without judge results initially)
-			record := models.DatasetRecord{
-				MainTopic: result.Job.MainTopic,
-				SubTopic:  result.Job.SubTopic,
-				Prompt:    result.Job.Prompt,
-				Chosen:    result.Chosen,
-				Rejected:  result.Rejected,
+			// Apply optional judge filtering (all modes except MO-DPO)
+			shouldFilter := false
+			if o.cfg.JudgeFiltering.Enabled && o.cfg.Generation.DatasetMode != models.DatasetModeMODPO {
+				shouldFilter = o.applyJudgeFiltering(result.Job.Prompt, result.Chosen, result.Rejected)
+				if shouldFilter {
+					o.stats.FilteredCount++
+					o.logger.Debug("Filtered record",
+						"job_id", result.Job.ID,
+						"reason", "below score thresholds")
+				}
 			}
 
-			// Note: Judge results will be added asynchronously via background goroutines
-			// WriteRecord now returns the record index for later updates
-			recordIndex, err := o.dataWriter.WriteRecord(record)
-			if err != nil {
-				o.logger.Error("Failed to write record",
-					"job_id", result.Job.ID,
-					"error", err)
-				o.stats.FailureCount++
-			} else {
-				o.stats.SuccessCount++
+			if !shouldFilter {
+				// Write based on dataset mode
+				err := o.writeRecordByMode(result)
+				if err != nil {
+					o.logger.Error("Failed to write record",
+						"job_id", result.Job.ID,
+						"error", err)
+					o.stats.FailureCount++
+				} else {
+					o.stats.SuccessCount++
 
-				// Spawn background judge goroutine (non-blocking!)
-				if o.judgeModule != nil {
-					o.pendingJudges.Add(1)
-					go o.evaluateJudgeAsync(recordIndex, result.Job.Prompt, result.Chosen, result.Rejected)
-				}
-
-				// Checkpoint progress (interval-based)
-				if o.checkpointMgr != nil {
-					if err := o.checkpointMgr.MarkJobComplete(result.Job.ID, o.stats); err != nil {
-						o.logger.Warn("Failed to checkpoint job", "job_id", result.Job.ID, "error", err)
+					// Checkpoint progress (interval-based)
+					if o.checkpointMgr != nil {
+						if err := o.checkpointMgr.MarkJobComplete(result.Job.ID, o.stats); err != nil {
+							o.logger.Warn("Failed to checkpoint job", "job_id", result.Job.ID, "error", err)
+						}
 					}
 				}
 			}
@@ -163,6 +169,129 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 
 		_ = bar.Add(1)
 	}
+}
+
+// applyJudgeFiltering evaluates and filters based on score thresholds
+func (o *Orchestrator) applyJudgeFiltering(prompt, chosen, rejected string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// Evaluate chosen response
+	chosenScore, err := o.judgeModule.EvaluateForFiltering(ctx, prompt, chosen)
+	if err != nil {
+		o.logger.Warn("Judge filtering failed for chosen response", "error", err)
+		return false // Don't filter on error
+	}
+
+	// Evaluate rejected response (if present)
+	var rejectedScore float64
+	if rejected != "" {
+		rejectedScore, err = o.judgeModule.EvaluateForFiltering(ctx, prompt, rejected)
+		if err != nil {
+			o.logger.Warn("Judge filtering failed for rejected response", "error", err)
+			return false // Don't filter on error
+		}
+	}
+
+	// Filter if chosen score too low OR rejected score too high
+	shouldFilter := chosenScore < o.cfg.JudgeFiltering.MinChosenScore ||
+		(rejected != "" && rejectedScore > o.cfg.JudgeFiltering.MaxRejectedScore)
+
+	return shouldFilter
+}
+
+// writeRecordByMode writes the record based on the configured dataset mode
+func (o *Orchestrator) writeRecordByMode(result models.GenerationResult) error {
+	switch o.cfg.Generation.DatasetMode {
+	case models.DatasetModeSFT:
+		return o.writeSFTRecord(result)
+	case models.DatasetModeDPO:
+		return o.writeDPORecord(result)
+	case models.DatasetModeKTO:
+		return o.writeKTORecord(result)
+	case models.DatasetModeMODPO:
+		return o.writeMODPORecord(result)
+	default:
+		return fmt.Errorf("unknown dataset mode: %s", o.cfg.Generation.DatasetMode)
+	}
+}
+
+// writeSFTRecord writes a simple instruction-output record
+func (o *Orchestrator) writeSFTRecord(result models.GenerationResult) error {
+	record := models.SFTRecord{
+		Instruction: result.Job.Prompt,
+		Output:      result.Chosen,
+	}
+
+	// Optionally include topic columns
+	if o.cfg.Generation.IncludeTopicColumns {
+		record.MainTopic = result.Job.MainTopic
+		record.SubTopic = result.Job.SubTopic
+	}
+
+	return o.dataWriter.WriteSFTRecord(record)
+}
+
+// writeDPORecord writes a standard DPO preference pair
+func (o *Orchestrator) writeDPORecord(result models.GenerationResult) error {
+	record := models.DPORecord{
+		Prompt:   result.Job.Prompt,
+		Chosen:   result.Chosen,
+		Rejected: result.Rejected,
+	}
+	return o.dataWriter.WriteDPORecord(record)
+}
+
+// writeKTORecord writes two KTO records (one chosen, one rejected)
+func (o *Orchestrator) writeKTORecord(result models.GenerationResult) error {
+	// Write chosen record
+	chosenRecord := models.KTORecord{
+		Prompt:     result.Job.Prompt,
+		Completion: result.Chosen,
+		Label:      true,
+	}
+	if err := o.dataWriter.WriteKTORecord(chosenRecord); err != nil {
+		return fmt.Errorf("failed to write KTO chosen record: %w", err)
+	}
+
+	// Write rejected record
+	rejectedRecord := models.KTORecord{
+		Prompt:     result.Job.Prompt,
+		Completion: result.Rejected,
+		Label:      false,
+	}
+	if err := o.dataWriter.WriteKTORecord(rejectedRecord); err != nil {
+		return fmt.Errorf("failed to write KTO rejected record: %w", err)
+	}
+
+	return nil
+}
+
+// writeMODPORecord writes a full MO-DPO record with judge evaluation
+func (o *Orchestrator) writeMODPORecord(result models.GenerationResult) error {
+	// Write initial record (without judge results)
+	record := models.DatasetRecord{
+		MainTopic: result.Job.MainTopic,
+		SubTopic:  result.Job.SubTopic,
+		Prompt:    result.Job.Prompt,
+		Chosen:    result.Chosen,
+		Rejected:  result.Rejected,
+	}
+
+	// Note: Judge results will be added asynchronously via background goroutines
+	// WriteRecord returns the record index for later updates
+	recordIndex, err := o.dataWriter.WriteRecord(record)
+	if err != nil {
+		return err
+	}
+
+	// Spawn background judge goroutine (non-blocking!)
+	if o.judgeModule != nil {
+		o.pendingJudges.Add(1)
+		go o.evaluateJudgeAsync(recordIndex, result.Job.Prompt, result.Chosen, result.Rejected)
+	}
+
+	return nil
 }
 
 // judgeUpdater runs in a background goroutine and processes judge result updates
