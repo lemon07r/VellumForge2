@@ -119,63 +119,57 @@ func (j *Judge) evaluateSingle(ctx context.Context, prompt, story string) (map[s
 // parseJudgeResponseWithRetries tries multiple JSON parsing strategies on the same response
 // This allows us to recover from common LLM JSON issues without making additional API calls
 func (j *Judge) parseJudgeResponseWithRetries(response string) (map[string]models.CriteriaScore, error) {
-	var lastErr error
-	
 	// Strategy 1: Standard extraction + sanitization
 	// This is the most common case and should work ~95% of the time
-	if scores, err := j.parseJudgeResponseStrategy1(response); err == nil {
+	scores, err := j.parseJudgeResponseStrategy1(response)
+	if err == nil {
 		j.logger.Debug("Parse succeeded with strategy 1 (standard)",
 			"response_length", len(response))
 		return scores, nil
-	} else {
-		lastErr = err
-		j.logger.Debug("Parse strategy 1 failed",
-			"error", err,
-			"will_try_next_strategy", true)
 	}
+	j.logger.Debug("Parse strategy 1 failed",
+		"error", err,
+		"will_try_next_strategy", true)
 
 	// Strategy 2: Aggressive repair with RepairJSON
 	// This handles missing commas, trailing commas, unescaped quotes, etc.
-	if scores, err := j.parseJudgeResponseStrategy2(response); err == nil {
+	scores, err = j.parseJudgeResponseStrategy2(response)
+	if err == nil {
 		j.logger.Info("Parse succeeded with strategy 2 (aggressive repair)",
 			"response_length", len(response))
 		return scores, nil
-	} else {
-		lastErr = err
-		j.logger.Debug("Parse strategy 2 failed",
-			"error", err,
-			"will_try_next_strategy", true)
 	}
+	j.logger.Debug("Parse strategy 2 failed",
+		"error", err,
+		"will_try_next_strategy", true)
 
 	// Strategy 3: Extract and repair with multiple passes
 	// This tries extraction first, then applies multiple repair techniques
-	if scores, err := j.parseJudgeResponseStrategy3(response); err == nil {
+	scores, err = j.parseJudgeResponseStrategy3(response)
+	if err == nil {
 		j.logger.Info("Parse succeeded with strategy 3 (multi-pass repair)",
 			"response_length", len(response))
 		return scores, nil
-	} else {
-		lastErr = err
-		j.logger.Debug("Parse strategy 3 failed",
-			"error", err,
-			"will_try_next_strategy", true)
 	}
+	j.logger.Debug("Parse strategy 3 failed",
+		"error", err,
+		"will_try_next_strategy", true)
 
 	// Strategy 4: Partial JSON recovery
 	// This attempts to extract and parse any valid JSON object, even if incomplete
-	if scores, err := j.parseJudgeResponseStrategy4(response); err == nil {
+	scores, err = j.parseJudgeResponseStrategy4(response)
+	if err == nil {
 		j.logger.Warn("Parse succeeded with strategy 4 (partial recovery)",
 			"response_length", len(response),
 			"note", "may have incomplete data")
 		return scores, nil
-	} else {
-		lastErr = err
-		j.logger.Debug("Parse strategy 4 failed",
-			"error", err,
-			"all_strategies_exhausted", true)
 	}
+	j.logger.Debug("Parse strategy 4 failed",
+		"error", err,
+		"all_strategies_exhausted", true)
 
 	// All strategies failed
-	return nil, fmt.Errorf("all %d parse strategies failed, last error: %w", maxParseStrategies, lastErr)
+	return nil, fmt.Errorf("all %d parse strategies failed, last error: %w", maxParseStrategies, err)
 }
 
 // parseJudgeResponseStrategy1 uses standard extraction + sanitization
@@ -183,8 +177,8 @@ func (j *Judge) parseJudgeResponseStrategy1(response string) (map[string]models.
 	// Extract JSON from response (may be wrapped in markdown code blocks)
 	jsonStr := util.ExtractJSON(response)
 
-	j.logger.Debug("Strategy 1: Extracted JSON", 
-		"length", len(jsonStr), 
+	j.logger.Debug("Strategy 1: Extracted JSON",
+		"length", len(jsonStr),
 		"first_200_chars", truncateString(jsonStr, 200))
 
 	// Sanitize JSON to handle common LLM issues
@@ -241,17 +235,17 @@ func (j *Judge) parseJudgeResponseStrategy3(response string) (map[string]models.
 func (j *Judge) parseJudgeResponseStrategy4(response string) (map[string]models.CriteriaScore, error) {
 	// Try to find and extract any valid JSON object, even if incomplete
 	jsonStr := util.ExtractJSON(response)
-	
+
 	// If extraction gave us something, try to parse it even if potentially incomplete
 	if len(jsonStr) > 0 {
 		// Apply all repairs
 		jsonStr = util.RepairJSON(jsonStr)
 		jsonStr = util.SanitizeJSON(jsonStr)
-		
+
 		// Try to parse with a more lenient decoder
 		var rawScores map[string]models.CriteriaScore
 		decoder := json.NewDecoder(strings.NewReader(jsonStr))
-		
+
 		// Attempt to decode - this may give us partial data
 		if err := decoder.Decode(&rawScores); err != nil {
 			return nil, fmt.Errorf("strategy 4 decode failed: %w", err)
