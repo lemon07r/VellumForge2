@@ -31,7 +31,8 @@ func getBuffer() *bytes.Buffer {
 // Only buffers under a size limit are returned to prevent holding large buffers.
 func putBuffer(buf *bytes.Buffer) {
 	// Only return buffers under a size limit to avoid holding large buffers in memory
-	const maxBufferSize = 16 * 1024 // 16KB
+	// 128KB accommodates large LLM responses with max_output_tokens up to 16384+ tokens
+	const maxBufferSize = 128 * 1024 // 128KB
 	if buf.Cap() <= maxBufferSize {
 		bufferPool.Put(buf)
 	}

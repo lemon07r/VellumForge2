@@ -35,7 +35,7 @@ func (o *Orchestrator) worker(
 
 		// Process job (judge runs async, no retries needed)
 		startTime := time.Now()
-		result := o.processJob(ctx, workerLogger, job, 0)
+		result := o.processJob(ctx, workerLogger, job)
 		result.Duration = time.Since(startTime)
 
 		results <- result
@@ -48,7 +48,6 @@ func (o *Orchestrator) processJob(
 	ctx context.Context,
 	logger *slog.Logger,
 	job models.GenerationJob,
-	attempt int,
 ) models.GenerationResult {
 	jobStartTime := time.Now()
 	result := models.GenerationResult{

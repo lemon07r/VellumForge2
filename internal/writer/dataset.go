@@ -19,7 +19,8 @@ type DatasetWriter struct {
 }
 
 // NewDatasetWriter creates a new dataset writer
-func NewDatasetWriter(sessionMgr *SessionManager, logger *slog.Logger, resumeMode bool) (*DatasetWriter, error) {
+// expectedRecords should be NumSubtopics × NumPromptsPerSubtopic for optimal pre-allocation
+func NewDatasetWriter(sessionMgr *SessionManager, logger *slog.Logger, resumeMode bool, expectedRecords int) (*DatasetWriter, error) {
 	datasetPath := sessionMgr.GetDatasetPath()
 
 	var file *os.File
@@ -41,10 +42,17 @@ func NewDatasetWriter(sessionMgr *SessionManager, logger *slog.Logger, resumeMod
 		logger.Info("Created dataset file", "path", datasetPath)
 	}
 
+	// Pre-allocate based on expected record count for optimal performance
+	// Falls back to 1024 if expectedRecords is 0 or invalid
+	initialCapacity := expectedRecords
+	if initialCapacity <= 0 {
+		initialCapacity = 1024
+	}
+
 	return &DatasetWriter{
 		file:    file,
 		logger:  logger,
-		records: make([]models.DatasetRecord, 0, 1024), // Pre-allocate for performance
+		records: make([]models.DatasetRecord, 0, initialCapacity),
 	}, nil
 }
 

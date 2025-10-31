@@ -201,7 +201,8 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create dataset writer (append mode for resume)
-	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode)
+	expectedRecords := cfg.Generation.NumSubtopics * cfg.Generation.NumPromptsPerSubtopic
+	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
 	if err != nil {
 		return fmt.Errorf("failed to create dataset writer: %w", err)
 	}
@@ -606,7 +607,8 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 	}
 
 	// Create dataset writer
-	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode)
+	expectedRecords := cfg.Generation.NumSubtopics * cfg.Generation.NumPromptsPerSubtopic
+	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
 	if err != nil {
 		return fmt.Errorf("failed to create dataset writer: %w", err)
 	}

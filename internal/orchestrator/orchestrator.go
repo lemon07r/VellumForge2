@@ -19,6 +19,13 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+const (
+	// judgeUpdateBufferSize is the channel buffer size for async judge result updates.
+	// This provides backpressure to prevent unbounded memory growth while allowing
+	// judge operations to complete asynchronously without blocking workers.
+	judgeUpdateBufferSize = 100
+)
+
 // judgeUpdate represents an async judge result update
 type judgeUpdate struct {
 	recordIndex int
@@ -83,8 +90,9 @@ func New(
 
 	// Initialize non-blocking judge support if judge is enabled
 	if judgeModule != nil {
-		o.judgeUpdates = make(chan judgeUpdate, 100) // Buffer for async updates
-		o.judgeSemaphore = make(chan struct{}, 64)   // Limit to 64 concurrent judge goroutines
+		o.judgeUpdates = make(chan judgeUpdate, judgeUpdateBufferSize)
+		// Judge semaphore scales with main concurrency to prevent bottleneck
+		o.judgeSemaphore = make(chan struct{}, cfg.Generation.Concurrency)
 	}
 
 	return o

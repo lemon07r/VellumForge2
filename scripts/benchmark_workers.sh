@@ -181,7 +181,7 @@ for workers in "${WORKER_COUNTS[@]}"; do
     # Display results
     echo ""
     echo "Results:"
-    echo "  Duration:          ${DURATION}s ($(python3 -c "print(f'{$DURATION/60:.2f}')") min)"
+    echo "  Duration:          ${DURATION}s ($(python3 -c "import sys; print(f'{float(sys.argv[1])/60:.2f}')" "$DURATION") min)"
     echo "  Throughput:        ${THROUGHPUT} jobs/min"
     echo "  Avg Time per Job:  ${AVG_TOTAL}s"
     echo "  Rate Limit Wait:   ${RATE_LIMIT_WAIT}ms"
@@ -220,7 +220,7 @@ BEST_WORKERS=0
 for result in "${RESULTS[@]}"; do
     IFS='|' read -r workers duration throughput avg_total rate_wait blocking session <<< "$result"
     
-    duration_min=$(python3 -c "print(f'{$duration/60:.2f}')")
+    duration_min=$(python3 -c "import sys; print(f'{float(sys.argv[1])/60:.2f}')" "$duration")
     
     printf "%-10s %-15s %-18s %-18s %-18s %-15s\n" \
         "$workers" "$duration_min" "$throughput" "$avg_total" "$rate_wait" "$blocking"
@@ -258,7 +258,7 @@ EOFMD
 
 for result in "${RESULTS[@]}"; do
     IFS='|' read -r workers duration throughput avg_total rate_wait blocking session <<< "$result"
-    duration_min=$(python3 -c "print(f'{$duration/60:.2f}')")
+    duration_min=$(python3 -c "import sys; print(f'{float(sys.argv[1])/60:.2f}')" "$duration")
     
     echo "| $workers | ${duration_min} min | $throughput jobs/min | ${avg_total}s | ${rate_wait}ms | ${blocking}% |" >> "$REPORT_FILE"
 done
