@@ -346,10 +346,10 @@ func TestDisableValidationLimits(t *testing.T) {
 			cfg: Config{
 				Generation: GenerationConfig{
 					MainTopic:               "Test",
-					NumSubtopics:            50000, // > 10000 but allowed
-					NumPromptsPerSubtopic:   20000, // > 10000 but allowed
-					Concurrency:             2048,  // > 1024 but allowed
-					DisableValidationLimits: true,  // Validation disabled
+					NumSubtopics:            50000,                 // > 10000 but allowed
+					NumPromptsPerSubtopic:   20000,                 // > 10000 but allowed
+					Concurrency:             2048,                  // > 1024 but allowed
+					DisableValidationLimits: true,                  // Validation disabled
 					DatasetMode:             models.DatasetModeDPO, // DPO mode doesn't require judge
 				},
 				Models: map[string]ModelConfig{

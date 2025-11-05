@@ -92,7 +92,7 @@ type SessionStats struct {
 	TotalPrompts    int
 	SuccessCount    int
 	FailureCount    int
-	FilteredCount   int           // Number of records filtered by judge
+	FilteredCount   int // Number of records filtered by judge
 	TotalDuration   time.Duration
 	AverageDuration time.Duration
 }

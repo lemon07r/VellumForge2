@@ -10,9 +10,9 @@ import (
 
 // JudgeFilteringConfig holds optional judge-based filtering settings
 type JudgeFilteringConfig struct {
-	Enabled          bool    `toml:"enabled"`           // Enable judge-based filtering
-	UseExplanations  bool    `toml:"use_explanations"`  // Include reasoning in judge responses (false = scores only)
-	MinChosenScore   float64 `toml:"min_chosen_score"`  // Minimum average score for chosen responses (1.0-5.0)
+	Enabled          bool    `toml:"enabled"`            // Enable judge-based filtering
+	UseExplanations  bool    `toml:"use_explanations"`   // Include reasoning in judge responses (false = scores only)
+	MinChosenScore   float64 `toml:"min_chosen_score"`   // Minimum average score for chosen responses (1.0-5.0)
 	MaxRejectedScore float64 `toml:"max_rejected_score"` // Maximum average score for rejected responses (1.0-5.0)
 }
 

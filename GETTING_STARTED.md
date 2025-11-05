@@ -1,872 +1,733 @@
 # Getting Started with VellumForge2
 
-This guide will help you get VellumForge2 up and running in minutes.
+Complete guide to installing, configuring, and running VellumForge2 for the first time.
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [First Run](#first-run)
+- [Common Use Cases](#common-use-cases)
+- [Troubleshooting](#troubleshooting)
+- [Best Practices](#best-practices)
+- [Advanced Configuration](#advanced-configuration)
 
 ## Prerequisites
 
-- Go 1.25 or higher
-- API key for an OpenAI-compatible LLM provider (e.g., NVIDIA, OpenAI, Together AI), or local server for serving an OpenAI-compatible API endpoint (llama.cpp or kobold.cpp server, etc)
-- (Optional) Hugging Face account with write token for dataset uploads
+- **Go 1.21+** (if building from source)
+- **API Key** for OpenAI-compatible provider (OpenAI, NVIDIA, Anthropic, Together AI, etc.)
+- **512MB RAM minimum** (2GB+ recommended for large datasets)
+- **Stable internet** for API calls
 
 ## Installation
 
-### Step 1: Install Go
+### Option 1: Download Prebuilt Binary (Recommended)
 
-If you don't have Go installed:
+1. Visit the [releases page](https://github.com/lemon07r/vellumforge2/releases)
+2. Download the binary for your platform:
+   - Linux: `vellumforge2-linux-amd64`
+   - macOS Intel/AMD: `vellumforge2-darwin-amd64`
+   - macOS Apple Silicon: `vellumforge2-darwin-arm64`
+   - Windows: `vellumforge2-windows-amd64.exe`
+3. Make it executable (Linux/macOS):
+   ```bash
+   chmod +x vellumforge2 # may require sudo
+   ```
 
-**Linux/macOS:**
-```bash
-wget https://go.dev/dl/go1.21.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.21.linux-amd64.tar.gz
-export PATH=$PATH:/usr/local/go/bin
-```
-
-**Or use your package manager:**
-```bash
-# Ubuntu/Debian
-sudo apt install golang-go
-
-# macOS
-brew install go
-```
-
-### Step 2: Clone and Build
+### Option 2: Build from Source
 
 ```bash
-# Clone the repository
-cd ~/Development
-git clone https://github.com/lamim/vellumforge2.git  # Or use your fork
+# Clone repository
+git clone https://github.com/lemon07r/vellumforge2.git
 cd vellumforge2
 
-# Download dependencies
-go mod download
+# Install dependencies
+make install
 
-# Build the binary
+# Build binary
 make build
 
-# Verify the build
+# Binary location: ./bin/vellumforge2
+```
+
+#### Platform-Specific Builds
+
+```bash
+# Build for all platforms
+make build-all
+
+# Or build for specific platform
+make build-linux
+make build-darwin
+make build-windows
+```
+
+### Verify Installation
+
+```bash
 ./bin/vellumforge2 --version
+# Output: vellumforge2 version 1.5.0 (commit: ..., built: ...)
 ```
 
 ## Configuration
 
-### Step 1: Set Up Configuration File
+### Step 1: Create Configuration File
 
 ```bash
-# Copy the example configuration
+# Copy example configuration
 cp configs/config.example.toml config.toml
-
-# Edit with your preferred editor (Even Better TOML VSCode extension is recommended)
-nano config.toml  # or vim, code, etc.
 ```
 
-**Minimal configuration changes:**
+Edit `config.toml` with your settings. Minimal configuration:
 
 ```toml
-# Provider-level rate limiting (v1.4.4+, recommended)
-[provider_rate_limits]
-nvidia = 40  # Global limit for all NVIDIA models
-
-provider_burst_percent = 15  # Default: balanced performance
-
 [generation]
-main_topic = "Your Topic Here"  # Change this to your desired theme
-num_subtopics = 2               # Start small for testing (max: 10000)
-num_prompts_per_subtopic = 2    # Start small for testing (max: 10000)
-concurrency = 64                # Recommended: 64-256 for maximum throughput (max: 1024)
-over_generation_buffer = 0.15   # Request 15% extra to hit target counts
-max_exclusion_list_size = 50    # Limit retry prompt size
+main_topic = "Fantasy Fiction"
+num_subtopics = 10
+num_prompts_per_subtopic = 2
+concurrency = 32
+dataset_mode = "dpo"  # Options: sft, dpo, kto, mo-dpo
 
 [models.main]
-base_url = "https://integrate.api.nvidia.com/v1"  # Your API endpoint
-model_name = "your-model-name"                     # Your model
-rate_limit_per_minute = 20                         # Your API rate limit
+base_url = "https://integrate.api.nvidia.com/v1"
+model_name = "moonshotai/kimi-k2-instruct-0905"
+temperature = 0.6
+max_output_tokens = 8192
+rate_limit_per_minute = 40
 
-[models.rejected]
-# Same structure as main, typically using a weaker model
+[models.rejected]  # Required for DPO/KTO/MO-DPO
+base_url = "http://localhost:8080/v1"
+model_name = "phi-4-mini-instruct"
+temperature = 0.0
+max_output_tokens = 4096
+
+[prompt_templates]
+chosen_generation = "Write a compelling story (400-600 words): {{.Prompt}}"
+rejected_generation = "Write a simple story (200-300 words): {{.Prompt}}"
 ```
+
+**Note:** Using a local model for rejected responses significantly reduces API costs and can help avoid rate limits to help generate datsets faster. See [Local Server Setup](#local-server-setup) below.
 
 ### Step 2: Set Up API Keys
 
 ```bash
-# Copy the example env file
+# Copy environment template
 cp configs/.env.example .env
-
-# Edit with your API keys
-nano .env
 ```
 
-**Example .env:**
-```bash
-# For NVIDIA API
-NVIDIA_API_KEY=nvapi-your-actual-key-here
+Edit `.env` with your API keys:
 
-# OR for OpenAI
-OPENAI_API_KEY=sk-your-actual-key-here
+```bash
+# Choose the provider you're using
+NVIDIA_API_KEY=nvapi-your-key-here
+# or
+OPENAI_API_KEY=sk-your-key-here
+# or
+ANTHROPIC_API_KEY=sk-ant-your-key-here
 
 # Optional: For Hugging Face uploads
-HUGGING_FACE_TOKEN=hf_your-actual-token-here
+HUGGINGFACE_TOKEN=hf_your-token-here
 ```
+
+**Important:** Keep `.env` secure. Never commit it to version control.
 
 ## First Run
 
 ### Test with Small Dataset
 
+Start with a small test run to verify everything works:
+
 ```bash
-# Run with verbose logging to see what's happening
+# Edit config.toml to use small values:
+# num_subtopics = 4
+# num_prompts_per_subtopic = 2
+# This will generate 8 preference pairs (takes ~2-5 minutes)
+
 ./bin/vellumforge2 run --config config.toml --verbose
 ```
 
-**What happens:**
-1. Creates a timestamped session directory (e.g., `session_2025-10-27T15-30-00/`)
-2. Generates subtopics from your main topic with **automatic retry** if count falls short
-3. Generates prompts for each subtopic
-4. Creates preference pairs (chosen/rejected responses)
-5. Saves everything to `output/session_*/dataset.jsonl`
+Expected output:
 
-**New Feature**: If the LLM returns fewer subtopics than requested (e.g., 271 instead of 344), VellumForge2 automatically:
-- Detects the gap
-- Makes up to 5 retry attempts to generate missing items
-- Filters duplicates
-- Shows detailed progress in logs
+```
+Loaded configuration from config.toml
+Session: session_2025-11-05T12-34-56
+Mode: DPO (standard preference pairs)
+
+[Stage 1/3] Generating subtopics...
+Generated 4/4 subtopics
+
+[Stage 2/3] Generating prompts...
+Generated 8/8 prompts
+
+[Stage 3/3] Generating preference pairs...
+[========] 8/8 jobs (100.0%) | 2.1 jobs/min
+
+Generation complete
+Success: 8/8 | Failures: 0 | Time: 3m 47s
+Output: output/session_2025-11-05T12-34-56/dataset.jsonl
+```
 
 ### Check the Results
 
 ```bash
-# List session directories
-ls -la session_*
+# View first record
+head -n 1 output/session_*/dataset.jsonl | jq .
 
-# View the dataset
-cat output/session_*/dataset.jsonl | jq .  # Pretty print JSON
+# Output (DPO format):
+{
+  "prompt": "Write a fantasy story about a dragon discovering ancient magic",
+  "chosen": "In the mountains of Eldoria, where mist cloaked the highest peaks...",
+  "rejected": "There was a dragon named Bob. He found some magic..."
+}
 
-# Check the logs
-less session_*/session.log
+# Count records
+wc -l output/session_*/dataset.jsonl
 ```
 
 ## Common Use Cases
 
 ### 1. Generate Story Dataset
 
+For creative fiction with strong vs weak responses:
+
 ```toml
 [generation]
-main_topic = "Science Fiction Space Opera"
-num_subtopics = 5
+main_topic = "Fantasy Fiction"
+num_subtopics = 100
 num_prompts_per_subtopic = 10
+concurrency = 64
+dataset_mode = "dpo"
 
 [models.main]
-model_name = "meta/llama-3.1-70b-instruct"
-temperature = 0.7
+model_name = "moonshotai/kimi-k2-instruct-0905"
+temperature = 0.6
+max_output_tokens = 8192
 
 [models.rejected]
-model_name = "meta/llama-3.1-8b-instruct"
-temperature = 1.0  # Adjust the temp for desired quality of responses
-```
-
-### 2. Technical Writing Dataset
-
-```toml
-[generation]
-main_topic = "Software Development Best Practices"
-num_subtopics = 8
-num_prompts_per_subtopic = 15
-
-[models.main]
-model_name = "gpt-4o"
-temperature = 0.5  # Lower for technical accuracy
-
-[models.rejected]
-model_name = "gpt-3.5-turbo"
-temperature = 0.7
-```
-
-### 3. With Story Generation and LLM-as-a-Judge
-
-```toml
-[models.judge]
-enabled = true
-model_name = "gpt-4o"  # Use a strong model for evaluation
-temperature = 0.2      # Low temp for consistent scoring
+model_name = "meta/llama-3.1-8b-instruct"  # Smaller model for weaker responses
+temperature = 0.0 # Adjust temperature for desired effect on responses
+max_output_tokens = 4096
 
 [prompt_templates]
-# Story generation templates (REQUIRED)
-chosen_generation = '''You are a talented fantasy writer.
-Write a compelling story (400-600 words) for this prompt:
+chosen_generation = '''You are a master storyteller. Write a compelling short story (400-600 words) based on this prompt:
 
 {{.Prompt}}
 
 Include vivid descriptions, engaging characters, and strong narrative voice.'''
 
-rejected_generation = '''Write a fantasy story for this prompt:
+rejected_generation = '''Write a simple story based on this prompt:
 
 {{.Prompt}}
 
-Write 300-400 words.'''
+Write 200-300 words.'''
+```
 
-# Judge evaluation template
-judge_rubric = '''
-Evaluate the story based on:
-1. Plot quality
-2. Character development  
-3. Writing style
-4. Creativity
+### 2. Technical Writing Dataset
 
-Return JSON with scores 1-5 for each criterion.
-'''
+For instructional or technical content:
+
+```toml
+[generation]
+main_topic = "Software Development Tutorials"
+num_subtopics = 50
+num_prompts_per_subtopic = 5
+concurrency = 64
+dataset_mode = "sft"  # Simple instruction-output pairs
+
+[models.main]
+model_name = "minimaxai/minimax-m2"
+temperature = 0.4  # Lower temperature for technical accuracy
+max_output_tokens = 3072
+
+[prompt_templates]
+chosen_generation = '''Write a clear, accurate technical explanation for:
+
+{{.Prompt}}
+
+Include code examples where appropriate and explain key concepts step-by-step.'''
+```
+
+### 3. With Judge Filtering
+
+For quality-controlled datasets:
+
+```toml
+[generation]
+dataset_mode = "dpo"
+
+[judge_filtering]
+enabled = true
+use_explanations = false  # Scores only for efficiency
+min_chosen_score = 4.5    # Keep only high-quality responses
+max_rejected_score = 2.5
+
+[models.judge]
+enabled = true
+base_url = "https://integrate.api.nvidia.com/v1"
+model_name = "meta/llama-3.1-70b-instruct"
+temperature = 0.4
+max_output_tokens = 2048
+
+[prompt_templates]
+judge_rubric = '''Evaluate this story on a 1-5 scale for:
+
+STORY:
+{{.StoryText}}
+
+Criteria:
+1. plot_quality
+2. writing_quality
+3. creativity
+
+Return ONLY valid JSON:
+{
+  "plot_quality": {"score": 1-5, "reasoning": "..."},
+  "writing_quality": {"score": 1-5, "reasoning": "..."},
+  "creativity": {"score": 1-5, "reasoning": "..."}
+}'''
 ```
 
 ### 4. Upload to Hugging Face
 
 ```bash
-./bin/vellumforge2 run \
-  --config config.toml \
+# Set token in .env
+echo "HUGGINGFACE_TOKEN=hf_your_token" >> .env
+
+# Generate and upload
+./bin/vellumforge2 run --config config.toml \
   --upload-to-hf \
-  --hf-repo-id your-username/your-dataset-name
+  --hf-repo-id username/my-fantasy-dataset
 ```
 
 ## Troubleshooting
 
-### Problem: "API rate limit exceeded"
+### Rate Limit Exceeded (429 Errors)
 
-**Solution 1** (v1.4.4+): Use provider-level rate limiting (recommended)
+**Symptom:** Frequent rate limit errors in logs
+
+**Solution 1:** Configure provider-level rate limiting
+
 ```toml
 [provider_rate_limits]
-nvidia = 40  # Global limit prevents 429 errors
-
-provider_burst_percent = 12  # Lower burst for fewer errors
+nvidia = 30  # Reduce from default 40
+provider_burst_percent = 10  # Reduce burst capacity
 
 [generation]
-concurrency = 64  # Can use high worker counts with provider limits
+concurrency = 32  # Reduce workers
 ```
 
-**Solution 2**: Reduce concurrency (older approach)
-```toml
-[generation]
-concurrency = 16  # Lower parallelism
+**Solution 2:** Reduce per-model limits
 
+```toml
 [models.main]
-rate_limit_per_minute = 20  # Conservative limit
+rate_limit_per_minute = 30  # Lower than actual limit for safety
 ```
 
-### Problem: "Failed to parse JSON response"
+**Solution 3:** Use local model for rejected responses
 
-**Causes:**
-- Model doesn't follow instructions to return JSON
-- Temperature too high causing erratic output
+```toml
+[models.rejected]
+base_url = "http://localhost:8080/v1"  # No API rate limits
+model_name = "phi-4-mini-instruct"
+```
 
-**Solutions:**
-1. Lower temperature: `temperature = 0.3`
-2. Update prompt template to be more explicit about JSON format
-3. Try a different model
+### JSON Parsing Errors
 
-**Note**: VellumForge2 has built-in JSON extraction and auto-retry, so most parse errors are handled automatically.
+**Symptom:** "Failed to parse JSON response" in logs
 
-### Problem: "Getting fewer subtopics than requested"
+**Solution:** VellumForge2 has 4 fallback parsing strategies achieving 99%+ success rate. If issues persist:
 
-**Example**: Requested 344 subtopics, only got 271
+1. Lower temperature for JSON generation:
+   ```toml
+   [models.main]
+   temperature = 0.7
+   structure_temperature = 0.2  # For JSON outputs
+   ```
 
-**Solution**: VellumForge2 v1.2+ automatically handles this with **configurable over-generation**:
-- Requests 115% of target count by default (configurable via `over_generation_buffer`)
-- Makes ONE retry attempt if still short
-- Filters duplicates automatically (case-insensitive)
-- Achieves 95%+ accuracy vs 79% with single-shot
-- Passes exclusion list to avoid repeats (limited to last 50 items by default)
-- Logs detailed progress
+2. Use concrete examples in prompts:
+   ```toml
+   [prompt_templates]
+   subtopic_generation = '''Generate subtopics.
 
-**Tuning over-generation:**
+   Return ONLY a JSON array:
+   ["subtopic 1", "subtopic 2", "subtopic 3"]
+
+   Generate now:'''
+   ```
+
+3. Avoid `use_json_mode` if model wraps arrays:
+   ```toml
+   [models.main]
+   use_json_mode = false  # Some models wrap arrays in objects
+   ```
+
+### Getting Fewer Subtopics/Prompts Than Requested
+
+**Symptom:** Generated 8 subtopics instead of 10
+
+**Solution:** The over-generation strategy handles this automatically. If consistently getting fewer items:
+
 ```toml
 [generation]
-over_generation_buffer = 0.15  # Default: request 15% extra
-# Increase for unreliable models:
-over_generation_buffer = 0.30  # Request 30% extra
-# Decrease for reliable models:
-over_generation_buffer = 0.05  # Request 5% extra
+over_generation_buffer = 0.25  # Increase from default 0.15 (15%) to 25%
 ```
 
-**What you'll see in logs**:
-```
-INFO  Generating subtopics with over-generation strategy target=344 requesting=395 buffer_percent=15
-INFO  Initial subtopic generation complete requested=395 received=390 unique=385 duplicates_filtered=5
-INFO  Target count achieved final_count=344 excess_trimmed=41
+This requests 25% extra, then deduplicates and trims to exact count.
+
+For large counts, use chunking:
+
+```toml
+[generation]
+num_subtopics = 200
+subtopic_chunk_size = 30  # Request in chunks of 30
 ```
 
-**Expected Success Rate**: 95-100% for counts up to 500 (99%+ with higher buffer)
+### Out of Memory
 
-### Problem: "Out of memory"
+**Symptom:** Process killed or memory exhaustion errors
 
 **Solution:** Reduce concurrency
+
 ```toml
 [generation]
-concurrency = 2  # Use fewer workers
+concurrency = 32  # Or lower depending on available RAM
 ```
 
-### Problem: "Connection timeout"
+Memory usage scales with concurrency and max_output_tokens. Approximate formula:
+```
+RAM ≈ concurrency × max_output_tokens × 4 bytes × 3 (main + rejected + judge)
+```
 
-**Solutions:**
-1. Check your internet connection
-2. Verify API endpoint is accessible
-3. Configure per-model backoff cap:
+### Connection Timeout
+
+**Symptom:** "connection refused" or "dial tcp" errors
+
+**Solution:** Increase backoff duration
+
 ```toml
 [models.main]
-max_backoff_seconds = 300  # 5 minutes for slow APIs
+max_backoff_seconds = 180  # Increase from default 120
+max_retries = 10  # Increase from default 3 for unstable connections
 ```
 
-### Problem: "Cannot stop generation"
+For local servers, set higher retries:
 
-**Solution**: VellumForge2 v1.2+ supports graceful shutdown
-
-**How to use:**
-- Press **Ctrl+C** once to initiate shutdown
-- Current batch completes, then stops cleanly
-- Partial dataset is saved automatically
-- Logs show "Generation cancelled by user"
-
-**Example:**
-```bash
-$ ./bin/vellumforge2 run --config config.toml
-# ... generation running ...
-^C  # Press Ctrl+C
-WARN  Generation cancelled by user (Ctrl+C)
-# Partial dataset saved to output/session_*/dataset.jsonl
-```
-
-### Problem: "Generation interrupted, want to resume"
-
-**Solution**: VellumForge2 v1.3+ includes checkpoint/resume functionality
-
-**Enable checkpointing:**
 ```toml
+[models.rejected]
+max_retries = 20
+```
+
+### Cannot Stop Generation
+
+**Problem:** Need to interrupt long-running generation
+
+**Solution:** Press Ctrl+C for graceful shutdown
+
+```
+^C
+Interrupt signal received. Shutting down gracefully...
+Saving checkpoint...
+Checkpoint saved: output/session_2025-11-05T12-34-56/checkpoint.json
+Shutdown complete. Progress saved.
+
+Resume with:
+  vellumforge2 checkpoint resume session_2025-11-05T12-34-56
+```
+
+If graceful shutdown fails, use Ctrl+C twice for immediate exit (checkpoint may not save).
+
+### Generation Interrupted, Want to Resume
+
+**Solution:** Use checkpoint resume feature
+
+```bash
+# Enable checkpointing in config.toml
 [generation]
 enable_checkpointing = true
-checkpoint_interval = 10  # Save every 10 completed jobs
-```
+checkpoint_interval = 10  # Save every 10 jobs
 
-**Resume after interruption:**
-
-**Option 1: Edit config and run normally**
-```toml
-[generation]
-resume_from_session = "session_2025-10-28T14-30-00"
-```
-```bash
-./bin/vellumforge2 run --config config.toml
-```
-
-**Option 2: Use CLI command (automatically resumes)**
-```bash
-./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
-```
-
-**Manage checkpoints:**
-```bash
-# List all sessions with checkpoint status
+# If interrupted, list available sessions
 ./bin/vellumforge2 checkpoint list
 
-# Inspect checkpoint details (shows progress %)
-./bin/vellumforge2 checkpoint inspect session_2025-10-28T14-30-00
+# Inspect checkpoint
+./bin/vellumforge2 checkpoint inspect session_2025-11-05T12-34-56
+
+# Resume generation
+./bin/vellumforge2 checkpoint resume session_2025-11-05T12-34-56
 ```
 
-**What gets saved:**
-- All completed subtopics
-- All generated prompts
-- Each completed preference pair
-- Progress statistics
-- Current phase
+The resume command validates checkpoint compatibility and appends to existing dataset.
 
-**Example workflow:**
-```bash
-# 1. Start generation with checkpointing
-$ ./bin/vellumforge2 run --config config.toml
-# ... 60% complete ...
-^C  # Interrupted!
+### Config Validation Errors
 
-# 2. List sessions to find your checkpoint
-$ ./bin/vellumforge2 checkpoint list
-SESSION                             CHECKPOINT   PHASE        PROGRESS
---------------------------------------------------------------------------------
-session_2025-10-28T14-30-00         Yes          pairs        60.5%
+**Symptom:** "validation error: concurrency exceeds maximum"
 
-# 3. Resume from checkpoint
-$ ./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
-INFO  Resuming from checkpoint: preference pairs phase
-      total=500 completed=302 pending=198 progress=60.4%
-# ... continues from 60% ...
-```
+**Solution:** If you need values exceeding safety limits:
 
-**Use cases:**
-- Long-running generations (10K+ rows)
-- Unstable connections
-- Saving API costs by avoiding restarts
-- Experimenting with partial runs
-
-**Performance:** < 1% overhead, async I/O
-
-### Problem: "Config validation errors"
-
-**Example**: "generation.concurrency must not exceed 1024"
-
-**Solution**: VellumForge2 enforces safety limits by default:
-- `concurrency`: max 1024
-- `num_subtopics`: max 10000
-- `num_prompts_per_subtopic`: max 10000
-
-**To exceed limits** (use with caution):
 ```toml
 [generation]
-disable_validation_limits = true
-concurrency = 2048  # Now allowed
+disable_validation_limits = true  # USE WITH CAUTION
+concurrency = 512  # Now allowed
 num_subtopics = 50000  # Now allowed
 ```
 
-**Warning**: Very high values may cause OOM or API rate limits
+**Warning:** Very high values may cause memory exhaustion or API rate limits. Only enable if you know what you're doing.
 
-### Problem: "Exclusion list truncated" warning
+### Exclusion List Truncated Warning
 
-**Symptoms**: Log shows "Exclusion list truncated to prevent prompt overflow"
+**Symptom:** "Exclusion list truncated from 75 to 50 items"
 
-**What it means**: On retry, VellumForge2 tells the LLM which items to avoid.
-With 100+ failures, this can overflow the prompt context.
+**Explanation:** This is normal behavior when retrying after duplicates. The exclusion list is limited to prevent context overflow.
 
-**Solution** (automatic): Uses only last 50 items (most recent failures).
+**Solution:** If you need larger exclusion lists (large context models):
 
-**To adjust**:
 ```toml
 [generation]
-max_exclusion_list_size = 100  # Increase for larger context models
+max_exclusion_list_size = 100  # Increase from default 50
 ```
 
 ## Best Practices
 
 ### 1. Start Small
-Begin with 2 subtopics and 2 prompts per subtopic to verify everything works before scaling up.
+
+Always test with small values first:
+
+```toml
+[generation]
+num_subtopics = 4
+num_prompts_per_subtopic = 2
+# Total: 8 records, takes ~3-5 minutes
+```
+
+Verify output quality before scaling to production values.
 
 ### 2. Monitor API Costs
-Track API usage in your provider's dashboard, especially when generating large datasets.
+
+Track spending using provider dashboards:
+
+- OpenAI: https://platform.openai.com/usage
+- Anthropic: https://console.anthropic.com/settings/usage
+
+You can use small local models for rejected responses to help reduce costs.
 
 ### 3. Use Version Control
-Keep your `config.toml` in git (but not `.env`!) to track dataset generation parameters.
+
+Track configuration changes:
+
+```bash
+git add config.toml
+git commit -m "Configure fantasy fiction DPO dataset"
+```
+
+Never commit `.env` file with API keys.
 
 ### 4. Backup Sessions
-Important sessions should be archived:
+
+Session directories contain everything needed to reproduce results:
+
 ```bash
-tar -czf important-session.tar.gz session_2025-10-27T15-30-00/
+# Backup completed session
+tar -czf session_2025-11-05.tar.gz output/session_2025-11-05T12-34-56/
+
+# Archive to separate location
+mv session_2025-11-05.tar.gz ~/backups/
 ```
 
 ### 5. Test Model Combinations
-Experiment with different model pairs for main/rejected to find optimal preference signals:
-- Strong vs Weak model
-- Same model with different temperatures
-- Instruct vs Base model
+
+Experiment with different main/rejected model pairs:
+
+```toml
+# Option 1: Same model, different temperatures
+[models.main]
+model_name = "meta/llama-3.1-70b-instruct"
+temperature = 0.6
+
+[models.rejected]
+model_name = "meta/llama-3.1-70b-instruct"
+temperature = 1.2
+
+# Option 2: Different models
+[models.main]
+model_name = "meta/llama-3.1-70b-instruct"
+
+[models.rejected]
+model_name = "meta/llama-3.1-8b-instruct"
+
+# Option 3: Instruct vs base model
+[models.main]
+model_name = "meta/llama-3.1-70b-instruct"
+
+[models.rejected]
+model_name = "meta/llama-3.1-70b"  # Base model (no instruct)
+```
 
 ### 6. Large Subtopic Counts
-When generating large numbers of subtopics (100+):
-- **v1.2**: Configurable over-generation strategy (default 15% buffer)
-- Automatic retry with exclusion list if short
-- Watch logs for duplicate filtering counts
-- Typical success rate is 95-100% for counts up to 500
-- Success rate 99%+ for counts up to 10000 with 0.20+ buffer
-- If model exhausts creativity, graceful degradation with partial results
 
-**Tips for very large counts** (1000+):
-```toml
-[generation]
-num_subtopics = 5000
-over_generation_buffer = 0.25  # Request 25% extra
-max_exclusion_list_size = 100  # Larger exclusion list for retries
-```
-
-## New in v1.4.4
-
-VellumForge2 v1.4.4 brings provider-level rate limiting and major performance improvements:
-
-### Provider-Level Rate Limiting
-
-**What it is**: Global rate limits that apply across all models using the same API provider.
-
-**Why it matters**: When using multiple models on the same provider (e.g., main + judge both on NVIDIA), individual model rate limits can combine to exceed the provider's actual limit, causing 429 errors. Provider-level limiting prevents this.
-
-**How to use:**
+For num_subtopics > 100, always use chunking:
 
 ```toml
-[provider_rate_limits]
-nvidia = 40  # All NVIDIA models share this 40 RPM limit
-
-provider_burst_percent = 15  # Configurable burst (default: 15%)
-
 [generation]
-concurrency = 64  # Safe to use high worker counts now
-
-[models.main]
-base_url = "https://integrate.api.nvidia.com/v1"
-rate_limit_per_minute = 40  # Ignored when provider limit is set
-
-[models.judge]
-base_url = "https://integrate.api.nvidia.com/v1"
-rate_limit_per_minute = 40  # Ignored when provider limit is set
+num_subtopics = 500
+subtopic_chunk_size = 30  # Request in chunks
+over_generation_buffer = 0.20  # Slightly higher buffer
+max_exclusion_list_size = 75  # Larger exclusion list
 ```
 
-**Benefits:**
-- Prevents rate limit errors when multiple models share a provider
-- Enables safe use of 64-256 workers for 2.5x throughput improvement
-- Configurable burst capacity balances throughput and compliance
-- Automatic provider detection (nvidia, openai, anthropic, together)
-
-**Burst Tuning:**
-- 15% (default): Balanced performance
-- 20-25%: Maximum throughput with 128-256 workers
-- 10-12%: Minimize rate limit errors
-
-### Performance Improvements
-
-**Benchmark Results** (32 jobs, NVIDIA NIM + local Phi-4):
-- **256 workers: 17.60/min** (fastest)
-- 96 workers: 14.79/min
-- 64 workers: 11.91/min
-- 16 workers: 7.06/min (old recommendation)
-
-**Key improvements:**
-- **2.5x throughput** with optimized worker counts (256 vs 16)
-- Asynchronous judge evaluation (non-blocking)
-- Performance logging for bottleneck analysis
-- Comprehensive benchmarking scripts included
-
-**Benchmarking**
-Test your config.toml against various different worker numbers to evaluate the optimal number for you. See the [Benchmarking README](BENCHMARK_README.md) for more information, it's as easy as `./scripts/quick_benchmark.sh 64 128 256` to test the config.toml in your working directory against those three worker numbers.
-
----
-
-## New in v1.3.0
-
-VellumForge2 v1.3.0 brings robust checkpoint/resume functionality:
-
-### Checkpoint & Resume
-
-**What it is**: Automatic state persistence during generation, allowing you to resume from any interruption.
-
-**Why it matters**: Long-running generations (10K+ rows) can be interrupted by network issues, system failures, or Ctrl+C. Resume from exactly where you left off without losing progress.
-
-**How to use:**
-
-1. **Enable in config:**
-```toml
-[generation]
-enable_checkpointing = true
-checkpoint_interval = 10  # Save every 10 jobs (default)
-```
-
-2. **Run normally:**
-```bash
-./bin/vellumforge2 run --config config.toml
-# ... generation running ...
-^C  # Interrupt with Ctrl+C
-```
-
-3. **Resume:**
-```bash
-# Option 1: Edit config
-[generation]
-resume_from_session = "session_2025-10-28T14-30-00"
-./bin/vellumforge2 run --config config.toml
-
-# Option 2: Use CLI
-./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
-```
-
-**CLI Commands:**
-```bash
-# List all sessions with checkpoint status
-./bin/vellumforge2 checkpoint list
-
-# Inspect checkpoint (shows detailed progress)
-./bin/vellumforge2 checkpoint inspect session_2025-10-28T14-30-00
-
-# Resume from checkpoint (auto-updates config)
-./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
-```
-
-**Features:**
-- Phase-based checkpointing (subtopics, prompts, pairs)
-- Async I/O for < 1% performance impact
-- Config validation (prevents incompatible resumes)
-- Works with graceful shutdown (Ctrl+C)
-- Atomic writes (no corruption)
-
----
-
-## New in v1.2.0 
-
-VellumForge2 v1.2.0 brings significant improvements for reliability, performance, and usability:
-
-### 1. Configurable Over-Generation Buffer
-
-**What it is**: Control how much extra the LLM requests to hit target counts.
-
-**Why it matters**: Different models have different reliability. Some consistently hit targets, others undershoot.
-
-**How to use**:
-```toml
-[generation]
-# Conservative (reliable models):
-over_generation_buffer = 0.05  # Request 5% extra
-
-# Default (most models):
-over_generation_buffer = 0.15  # Request 15% extra (default)
-
-# Aggressive (unreliable models):
-over_generation_buffer = 0.30  # Request 30% extra
-```
-
-**Impact**: Achieves 95-100% target accuracy vs 79% with single-shot generation.
-
-### 2. Graceful Shutdown with Ctrl+C
-
-**What it is**: Stop generation cleanly without killing the process.
-
-**Why it matters**: No more `kill -9` or losing all progress. Partial datasets are saved automatically.
-
-**How to use**: Just press Ctrl+C once:
-```bash
-$ ./bin/vellumforge2 run --config config.toml
-# ... generation running ...
-^C  # Press Ctrl+C - completes current batch, then stops
-WARN  Generation cancelled by user (Ctrl+C)
-# Partial dataset saved!
-```
-
-### 3. Configurable Backoff Caps
-
-**What it is**: Limit maximum retry wait time to prevent indefinite hangs.
-
-**Why it matters**: Rate limit retries use exponential backoff (6s, 18s, 54s...). Without a cap, this could reach hours.
-
-**How to use**:
-```toml
-[models.main]
-max_backoff_seconds = 120  # Default: 2 minutes
-# Or increase for slow APIs:
-max_backoff_seconds = 300  # 5 minutes
-```
-
-### 4. Exclusion List Size Limits
-
-**What it is**: Limit retry prompt size to prevent context overflow.
-
-**Why it matters**: When retrying, VellumForge2 tells the LLM which items to avoid. With 300+ failures, this overflows the prompt.
-
-**How to use**:
-```toml
-[generation]
-max_exclusion_list_size = 50  # Default: last 50 items
-# Increase for large context models:
-max_exclusion_list_size = 200  # Use more history
-```
-
-### 5. Safety Limits with Override Option
-
-**What it is**: Config validation prevents dangerous values, with option to disable.
-
-**Default limits**:
-- `concurrency`: 1-1024
-- `num_subtopics`: 1-10000
-- `num_prompts_per_subtopic`: 1-10000
-
-**To exceed limits**:
-```toml
-[generation]
-disable_validation_limits = true  # USE WITH CAUTION
-concurrency = 2048  # Now allowed
-num_subtopics = 100000  # Now allowed
-```
-
-**Warning**: Only disable if you have sufficient memory and understand the implications.
-
-### 6. Performance Optimizations
-
-**What changed**:
-- Template caching: 5-10x faster template rendering
-- Precompiled regex: 10-25x faster JSON extraction
-- Overall: Significantly faster generation pipeline
-
-**You don't need to do anything** - these optimizations are automatic!
-
----
+This significantly reduces JSON parsing errors.
 
 ## Advanced Configuration
 
-### Smart Over-Generation Strategy
+### Local Server Setup
 
-VellumForge2 uses an intelligent over-generation strategy to reliably achieve target counts:
+#### llama.cpp
 
-**How it works:**
-1. **Over-generate**: Requests 115% of target count (e.g., 395 for 344 target)
-2. **Deduplicate**: Removes duplicate subtopics (case-insensitive)
-3. **Trim or Retry**: 
-   - If count ≥ target → trim to exact count
-   - If count < target → make ONE retry for the difference
+```bash
+# Download model
+wget https://huggingface.co/unsloth/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf # OR any other small model, try to keep it similar to the model you want to train e.g. use Qwen3 4b if you plan to train Qwen3 32b, etc.
 
-**Benefits:**
-- ✅ 95%+ count accuracy (vs 79% with single-shot)
-- ✅ Fewer API calls (1-2 requests vs 3-5 with iterative)
-- ✅ Robust JSON validation prevents parse failures
-- ✅ Graceful degradation (returns partial results if retry fails)
+# Start server (found in /build/bin/ after building, see https://github.com/ggml-org/llama.cpp for more information)
+./llama-server -m ~/ggufs/Phi-4-mini-instruct-Q4_K_M.gguf -c 8192 --no-webui --parallel 8 --n-gpu-layers 99 --flash-attn on --cont-batching # Adjust based on your system's resources, these are good settings for performance. Context size can be lowered for better performance, and the parallelism can be decreased for more tokens/sec at the cost of less requests per minute.
 
-**Logging output:**
+# Configure in config.toml
+[models.rejected]
+base_url = "http://localhost:8080/v1"
+model_name = "phi-4-mini-instruct-Q6_K.gguf"
+rate_limit_per_minute = 60  # Local models can handle higher rates
+max_retries = 20  # Higher for local startup time
 ```
-INFO  Generating subtopics with over-generation strategy target=344 requesting=395 buffer_percent=15
-INFO  Initial subtopic generation complete requested=395 received=390 unique=385 duplicates_filtered=5
-INFO  Target count achieved final_count=344 excess_trimmed=41
+
+#### Ollama (not recommended over other options)
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull model
+ollama pull phi3
+
+# Starts automatically at localhost:11434
+
+# Configure in config.toml
+[models.rejected]
+base_url = "http://localhost:11434/v1"
+model_name = "phi3"
+rate_limit_per_minute = 60
+max_retries = 20
 ```
+
+vLLM is recommended for more advanced users for better performance and scalability.
 
 ### Custom Prompt Templates
 
+Full customization with template variables:
+
 ```toml
 [prompt_templates]
-# Subtopic generation with smart over-generation and retry support
-subtopic_generation = '''
-You are an expert in {{.MainTopic}}.
-Generate {{.NumSubtopics}} specific subtopics.
 
-{{if .IsRetry}}NOTE: Avoid these already generated: {{.ExcludeSubtopics}}
+subtopic_generation = '''You are an expert in {{.MainTopic}}. Generate {{.NumSubtopics}} unique subtopics.
+
+{{if .IsRetry}}Avoid these already generated: {{.ExcludeSubtopics}}
 {{end}}
 
-Return ONLY a JSON array: ["topic1", "topic2", ...]
-'''
+Requirements:
+- Specific and detailed
+- Unique from each other
+- Rich with potential
 
-prompt_generation = '''
-Create {{.NumPrompts}} diverse prompts about: {{.SubTopic}}
-Each prompt should be 2-3 sentences.
-Return ONLY a JSON array: ["prompt1", "prompt2", ...]
-'''
+Return ONLY a JSON array: ["subtopic 1", "subtopic 2", ...]'''
+
+prompt_generation = '''Main topic: {{.MainTopic}}
+Subtopic: {{.SubTopic}}
+
+Generate {{.NumPrompts}} unique and compelling prompts for creative writing.
+
+Return ONLY a JSON array: ["prompt 1", "prompt 2", ...]'''
+
+chosen_generation = '''Main Topic: {{.MainTopic}}
+Subtopic: {{.SubTopic}}
+Prompt: {{.Prompt}}
+
+Write a masterful response showcasing expert-level quality.'''
+
+rejected_generation = '''Prompt: {{.Prompt}}
+
+Write a basic response.'''
 ```
 
-**Template Variables**:
-
-- **Subtopic Generation:**
-  - `{{.MainTopic}}` - Your main theme
-  - `{{.NumSubtopics}}` - Count to generate (auto-adjusted for over-generation and retry)
-  - `{{.IsRetry}}` - Boolean, true on retry attempts (optional)
-  - `{{.ExcludeSubtopics}}` - Comma-separated list of already generated subtopics (optional, only on retry)
-
-- **Prompt Generation:**
-  - `{{.SubTopic}}` - Current subtopic
-  - `{{.NumPrompts}}` - Prompts to generate
-  - `{{.MainTopic}}` - Main topic (also available)
-
-- **Story Generation (chosen_generation, rejected_generation):**
-  - `{{.Prompt}}` - The writing prompt
-  - `{{.MainTopic}}` - Main topic
-  - `{{.SubTopic}}` - Current subtopic
-
-- **Judge Evaluation:**
-  - `{{.Prompt}}` - Original writing prompt
-  - `{{.StoryText}}` - Story to evaluate
-
-### Multiple API Providers
-
-Different models can use different providers:
-
-```toml
-[models.main]
-base_url = "https://api.openai.com/v1"
-model_name = "gpt-4o"
-
-[models.rejected]
-base_url = "https://integrate.api.nvidia.com/v1"
-model_name = "meta/llama-3.1-8b-instruct"
-
-[models.judge]
-base_url = "https://api.anthropic.com/v1"
-model_name = "claude-3-opus"
-```
+Available variables:
+- `subtopic_generation`: MainTopic, NumSubtopics, IsRetry, ExcludeSubtopics
+- `prompt_generation`: SubTopic, NumPrompts, MainTopic
+- `chosen_generation`: Prompt, MainTopic, SubTopic
+- `rejected_generation`: Prompt, MainTopic, SubTopic
+- `judge_rubric`: Prompt, StoryText
 
 ### Performance Tuning
 
-For maximum throughput (v1.4.4+):
+#### High-Throughput Setup
 
-```toml
-[provider_rate_limits]
-nvidia = 40  # Global provider limit
-
-provider_burst_percent = 20  # Higher burst for maximum throughput
-
-[generation]
-concurrency = 256  # Maximum workers 
-
-[models.main]
-rate_limit_per_minute = 40  # Per-model limit (ignored when provider limit set)
-```
-
-For balanced performance:
+For maximum speed with provider rate limiting:
 
 ```toml
 [provider_rate_limits]
 nvidia = 40
-
-provider_burst_percent = 15  # Default: balanced
+provider_burst_percent = 25  # Higher burst for better throughput
 
 [generation]
-concurrency = 64  # Good balance of throughput and resource usage
-```
-
-Faster APIs with higher RPM limits can benefit from higher worker numbers. Use the benchmark scripts to evaluate your config.toml against various worker numbers. See the [Benchmarking README](BENCHMARK_README.md)
-
-For minimal API usage:
-
-```toml
-[generation]
-concurrency = 8  # Lower parallelism
+concurrency = 256  # Maximum workers
+over_generation_buffer = 0.15
 
 [models.main]
-rate_limit_per_minute = 10  # Conservative limit
+rate_limit_per_minute = 40
+
+[models.rejected]
+base_url = "http://localhost:8080/v1"  # Local model = no rate limits
+rate_limit_per_minute = 120
+```
+
+#### Conservative Setup
+
+For avoiding rate limits entirely:
+
+```toml
+[provider_rate_limits]
+nvidia = 30  # Below actual limit
+provider_burst_percent = 10  # Low burst
+
+[generation]
+concurrency = 32  # Conservative worker count
+
+[models.main]
+rate_limit_per_minute = 30
+```
+
+#### Balanced Setup
+
+For good throughput with reliability:
+
+```toml
+[provider_rate_limits]
+nvidia = 40
+provider_burst_percent = 15  # Default
+
+[generation]
+concurrency = 64  # Moderate worker count
+
+[models.main]
+rate_limit_per_minute = 40
 ```
 
 ## Next Steps
 
-1. **Scale Up**: Once you've verified the basic setup works, increase `num_subtopics` and `num_prompts_per_subtopic`
-
-2. **Enable Judge**: Add LLM-as-a-Judge evaluation to get quality scores
-
-3. **Share**: Upload your dataset to Hugging Face to contribute to the community
-
-4. **Train**: Use your generated dataset with a DPO training framework like:
-   - [TRL](https://github.com/huggingface/trl)
-   - [Alignment Handbook](https://github.com/huggingface/alignment-handbook)
-   - [Axolotl](https://github.com/OpenAccess-AI-Collective/axolotl)
+- Explore dataset modes: [DATASET_MODES.md](DATASET_MODES.md)
+- Benchmark your config: [BENCHMARK_README.md](BENCHMARK_README.md)
+- Check changelog: [CHANGELOG.md](CHANGELOG.md)
+- View complete config reference: [configs/config.example.toml](configs/config.example.toml)
 
 ## Getting Help
 
-- Read the [full README](README.md)
-- Report bugs in [GitHub Issues](https://github.com/lamim/vellumforge2/issues)
-- Ask questions in [Discussions](https://github.com/lamim/vellumforge2/discussions)
-- Check [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
-
-## Example: Complete First Run
-
-```bash
-# 1. Setup
-cd vellumforge2
-cp configs/config.example.toml config.toml
-cp configs/.env.example .env
-
-# 2. Edit config.toml
-# - Set main_topic to "Fantasy Adventures"
-# - Set num_subtopics to 2
-# - Set num_prompts_per_subtopic to 2
-# - Configure your API endpoint and model
-
-# 3. Edit .env with your API key
-echo "NVIDIA_API_KEY=nvapi-your-key" > .env
-
-# 4. Build
-make build
-
-# 5. Run
-./bin/vellumforge2 run --config config.toml --verbose
-
-# 6. Check results
-ls session_*/
-cat output/session_*/dataset.jsonl | jq .
-
-# Success! You've generated your first DPO dataset!
-```
-
-Congratulations! You're now ready to generate synthetic DPO datasets at scale. 🎉
+- Check [Troubleshooting](#troubleshooting) section above
+- Search [GitHub Issues](https://github.com/lemon07r/vellumforge2/issues)
+- Ask in [Discussions](https://github.com/lemon07r/vellumforge2/discussions)
+- Review example datasets: [HuggingFace Collection](https://huggingface.co/collections/lemon07r/vellumforge2-datasets)
