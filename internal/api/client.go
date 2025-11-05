@@ -143,7 +143,7 @@ func (c *Client) ChatCompletion(
 
 			c.logger.Warn("Retrying API request",
 				"attempt", attempt,
-				"max_retries", c.maxRetries,
+				"max_retries", maxAttempts,
 				"backoff", sleepDuration,
 				"model", modelCfg.ModelName,
 				"is_rate_limit", lastErr != nil && c.isRateLimitError(lastErr))
@@ -203,7 +203,8 @@ func (c *Client) ChatCompletionStructured(
 		tempCfg.Temperature = modelCfg.StructureTemperature
 		c.logger.Debug("Using structure_temperature for JSON generation",
 			"structure_temp", modelCfg.StructureTemperature,
-			"regular_temp", modelCfg.Temperature)
+			"original_temp", modelCfg.Temperature,
+			"actual_temp_used", tempCfg.Temperature)
 	}
 
 	// Call regular ChatCompletion with modified config
