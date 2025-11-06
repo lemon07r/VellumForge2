@@ -521,7 +521,27 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 }
 
 func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) ([]models.GenerationJob, error) {
-	o.logger.Info("Generating prompts for all subtopics with parallel workers...", "total_subtopics", len(subtopics), "concurrency", o.cfg.Generation.Concurrency)
+	// Calculate optimal worker count for prompt generation phase
+	// Cap workers to avoid overwhelming rate limits with too many concurrent requests
+	mainModel := o.cfg.Models["main"]
+	effectiveRPM, burstCapacity, usingProviderLimit := o.apiClient.GetEffectiveRateLimit(mainModel)
+
+	// Cap workers at burst capacity to prevent rate limit exhaustion
+	// Use min3(subtopics, burstCapacity, concurrency) for optimal scaling
+	promptWorkers := min3(len(subtopics), burstCapacity, o.cfg.Generation.Concurrency)
+
+	// Log worker calculation reasoning
+	limitType := "model"
+	if usingProviderLimit {
+		limitType = "provider"
+	}
+	o.logger.Info("Calculating optimal workers for prompt generation",
+		"total_subtopics", len(subtopics),
+		"phase3_concurrency", o.cfg.Generation.Concurrency,
+		"effective_rate_limit", effectiveRPM,
+		"burst_capacity", burstCapacity,
+		"limit_type", limitType,
+		"prompt_workers", promptWorkers)
 
 	// Use worker pool for parallel prompt generation
 	type subtopicTask struct {
@@ -539,10 +559,10 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 	tasksChan := make(chan subtopicTask, len(subtopics))
 	resultsChan := make(chan promptResult, len(subtopics))
 
-	// Start workers
+	// Start workers with calculated optimal count
 	var wg sync.WaitGroup
-	wg.Add(o.cfg.Generation.Concurrency) // Add all workers before starting goroutines
-	for i := 0; i < o.cfg.Generation.Concurrency; i++ {
+	wg.Add(promptWorkers)
+	for i := 0; i < promptWorkers; i++ {
 		go func(workerID int) {
 			defer wg.Done()
 			for task := range tasksChan {
@@ -737,4 +757,16 @@ func (o *Orchestrator) generatePreferencePairs(ctx context.Context, jobs []model
 // GetStats returns the session statistics
 func (o *Orchestrator) GetStats() *models.SessionStats {
 	return o.stats
+}
+
+// min3 returns the minimum of three integers
+func min3(a, b, c int) int {
+	result := a
+	if b < result {
+		result = b
+	}
+	if c < result {
+		result = c
+	}
+	return result
 }

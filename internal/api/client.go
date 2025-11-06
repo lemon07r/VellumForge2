@@ -75,6 +75,31 @@ func (c *Client) SetMaxRetries(maxRetries int) {
 	c.maxRetries = maxRetries
 }
 
+// GetEffectiveRateLimit returns the effective rate limit for a model, considering provider-level limits
+// Returns: (effectiveRPM, burstCapacity, usingProviderLimit)
+func (c *Client) GetEffectiveRateLimit(modelCfg config.ModelConfig) (int, int, bool) {
+	providerName := config.GetProviderName(modelCfg.BaseURL)
+
+	// Check if provider-level rate limit is configured
+	if c.providerRateLimits != nil {
+		if providerRPM, ok := c.providerRateLimits[providerName]; ok {
+			// Use provider limit with configurable burst
+			burstPercent := c.providerBurstPercent
+			if burstPercent == 0 {
+				burstPercent = 15 // Default
+			}
+			burstCapacity := max((providerRPM*burstPercent)/100, 3)
+			return providerRPM, burstCapacity, true
+		}
+	}
+
+	// Fall back to model-level rate limit
+	// Model limiters use fixed 20% burst
+	modelRPM := modelCfg.RateLimitPerMinute
+	burstCapacity := max(modelRPM/5, 5)
+	return modelRPM, burstCapacity, false
+}
+
 // ChatCompletion sends a chat completion request to the specified model
 func (c *Client) ChatCompletion(
 	ctx context.Context,
