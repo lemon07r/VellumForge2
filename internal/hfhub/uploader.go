@@ -113,9 +113,18 @@ func (u *Uploader) Upload(repoID, sessionDir string) error {
 
 		// Track LFS files for upload
 		if op.LFSFile != nil {
+			// Generate sample preview (first 200 bytes as base64)
+			sample, err := generateFileSample(localPath, 200)
+			if err != nil {
+				u.logger.Warn("Failed to generate sample", "file", localFilename, "error", err)
+				sample = "" // Continue without sample
+			}
+
 			lfsFiles = append(lfsFiles, LFSPointer{
-				OID:  op.LFSFile.SHA256,
-				Size: op.LFSFile.Size,
+				OID:    op.LFSFile.SHA256,
+				Size:   op.LFSFile.Size,
+				Path:   hfFilename,
+				Sample: sample,
 			})
 			filePaths[op.LFSFile.SHA256] = localPath
 			u.logger.Debug("File will use LFS", "file", hfFilename, "size", op.LFSFile.Size)
@@ -333,6 +342,26 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 // createGitAttributesOperation creates a .gitattributes file operation
 // that configures proper text handling for JSONL files to ensure
 // the HuggingFace viewer renders newlines correctly
+// generateFileSample reads the first n bytes of a file and returns base64 encoded
+func generateFileSample(filePath string, sampleSize int64) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	buffer := make([]byte, sampleSize)
+	n, err := file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+
+	return base64.StdEncoding.EncodeToString(buffer[:n]), nil
+}
+
+// createGitAttributesOperation creates a .gitattributes file operation
 func (u *Uploader) createGitAttributesOperation() (*CommitOperation, error) {
 	// Create .gitattributes content that:
 	// 1. Includes standard HuggingFace LFS patterns

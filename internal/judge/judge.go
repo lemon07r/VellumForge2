@@ -38,16 +38,16 @@ func New(cfg *config.Config, secrets *config.Secrets, apiClient *api.Client, log
 	}
 }
 
-// Evaluate sends a story to the judge model for evaluation
+// Evaluate sends a story to the judge model for evaluation (full mode with explanations)
 func (j *Judge) Evaluate(ctx context.Context, prompt, chosen, rejected string) (*models.JudgeResult, error) {
 	// Evaluate chosen response
-	chosenScores, err := j.evaluateSingle(ctx, prompt, chosen)
+	chosenScores, err := j.evaluateSingle(ctx, prompt, chosen, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate chosen response: %w", err)
 	}
 
 	// Evaluate rejected response
-	rejectedScores, err := j.evaluateSingle(ctx, prompt, rejected)
+	rejectedScores, err := j.evaluateSingle(ctx, prompt, rejected, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate rejected response: %w", err)
 	}
@@ -66,14 +66,36 @@ func (j *Judge) Evaluate(ctx context.Context, prompt, chosen, rejected string) (
 	}, nil
 }
 
-func (j *Judge) evaluateSingle(ctx context.Context, prompt, story string) (map[string]models.CriteriaScore, error) {
-	// Render judge prompt
-	judgePrompt, err := util.RenderTemplate(j.cfg.PromptTemplates.JudgeRubric, map[string]interface{}{
-		"Prompt":    prompt,
-		"StoryText": story,
-	})
+// EvaluateForFiltering evaluates a single response for filtering purposes (score only, no reasoning)
+// This is much more efficient than full evaluation when only scores are needed.
+func (j *Judge) EvaluateForFiltering(ctx context.Context, prompt, response string) (float64, error) {
+	scores, err := j.evaluateSingle(ctx, prompt, response, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to render judge template: %w", err)
+		return 0, err
+	}
+	return calculateAverageScore(scores), nil
+}
+
+func (j *Judge) evaluateSingle(ctx context.Context, prompt, story string, includeReasoning bool) (map[string]models.CriteriaScore, error) {
+	// Render judge prompt - use simplified version if reasoning not needed
+	var judgePrompt string
+	var err error
+
+	if includeReasoning {
+		// Full rubric with reasoning
+		judgePrompt, err = util.RenderTemplate(j.cfg.PromptTemplates.JudgeRubric, map[string]interface{}{
+			"Prompt":    prompt,
+			"StoryText": story,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to render judge template: %w", err)
+		}
+	} else {
+		// Simplified rubric for filtering (scores only)
+		judgePrompt, err = j.getFilteringPrompt(prompt, story)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate filtering prompt: %w", err)
+		}
 	}
 
 	judgeModel := j.cfg.Models["judge"]
@@ -85,17 +107,31 @@ func (j *Judge) evaluateSingle(ctx context.Context, prompt, story string) (map[s
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
 	defer cancel()
 
+	// Build messages with optional system prompt
+	messages := []api.Message{}
+	if j.cfg.PromptTemplates.JudgeSystemPrompt != "" {
+		messages = append(messages, api.Message{
+			Role:    "system",
+			Content: j.cfg.PromptTemplates.JudgeSystemPrompt,
+		})
+	}
+	messages = append(messages, api.Message{
+		Role:    "user",
+		Content: judgePrompt,
+	})
+
 	// Call judge model ONCE
 	// API-level retries are handled by the API client for network errors, timeouts, etc.
-	resp, err := j.apiClient.ChatCompletion(timeoutCtx, judgeModel, apiKey, []api.Message{
-		{Role: "user", Content: judgePrompt},
-	})
+	resp, err := j.apiClient.ChatCompletion(timeoutCtx, judgeModel, apiKey, messages)
 	if err != nil {
 		// API call failed - network error, timeout, rate limit, etc.
 		// The API client has already retried these errors appropriately
 		return nil, fmt.Errorf("API call failed: %w", err)
 	}
 
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("API returned empty response")
+	}
 	// Parse response with multiple strategies
 	// This tries different JSON repair techniques on the SAME response
 	// No additional API calls are made - this is purely local processing
@@ -279,6 +315,41 @@ func calculateAverageScore(scores map[string]models.CriteriaScore) float64 {
 	}
 
 	return float64(sum) / float64(len(scores))
+}
+
+// getFilteringPrompt generates a simplified judge prompt for filtering (scores only, no reasoning)
+func (j *Judge) getFilteringPrompt(prompt, story string) (string, error) {
+	// Use a simplified template that only asks for scores
+	template := `You are an expert literary evaluator. Rate the following story based on the prompt.
+
+PROMPT:
+{{.Prompt}}
+
+STORY:
+{{.StoryText}}
+
+Evaluate the story and provide ONLY scores (1-5) for each criterion. Do NOT provide reasoning or explanations.
+
+Return ONLY valid JSON in this exact format:
+{
+  "criterion1": {"score": 1-5},
+  "criterion2": {"score": 1-5},
+  "criterion3": {"score": 1-5}
+}
+
+Criteria to evaluate (score 1-5 for each):
+1. plot_and_structural_integrity
+2. character_and_dialogue
+3. world_building_and_immersion
+4. prose_style_and_voice
+5. coherence_and_factual_consistency
+
+Return ONLY the JSON object, no markdown formatting.`
+
+	return util.RenderTemplate(template, map[string]interface{}{
+		"Prompt":    prompt,
+		"StoryText": story,
+	})
 }
 
 // truncateString truncates a string to maxLen characters

@@ -1,248 +1,304 @@
-# VellumForge2 Configuration Example
-# This file demonstrates all available configuration options
+# VellumForge2 Configuration
+# Complete example with all options documented
 
-# Global provider-level rate limits (optional)
-# These override individual model rate limits for all models using the same provider
-# Useful when a provider has a global API rate limit that applies across all models
+# === PROVIDER-LEVEL RATE LIMITING ===
+# Global rate limits shared across all models from same provider
+# Overrides individual model rate_limit_per_minute settings
+# Use when provider has a global API quota (e.g., all NVIDIA models share one limit)
 [provider_rate_limits]
-# nvidia = 40  # All NVIDIA models share this limit
-# openai = 500
+nvidia = 40        # Requests per minute for all NVIDIA models combined
+# openai = 500       # Requests per minute for all OpenAI models combined
 # anthropic = 200
 # together = 100
 
-# Provider burst capacity as percentage (1-50, default: 15)
-# Controls how many simultaneous requests can exceed the steady-state rate
-# Higher burst (20-25%) improves throughput with many workers (64+) but may cause occasional rate limit errors
-# Lower burst (10-12%) reduces rate limit errors but may throttle throughput with high concurrency
-# Recommended: 15% for balanced performance, 20%+ for maximum throughput with 64+ workers
+# Burst capacity percentage (1-50, default: 15)
+# Controls simultaneous requests exceeding steady-state rate
+# Higher burst (20-25%) = better throughput with 64+ workers but may cause occasional 429 errors
+# Lower burst (10-12%) = fewer 429 errors but may throttle throughput
 # provider_burst_percent = 15
 
+# === GENERATION SETTINGS ===
 [generation]
-# The main theme/topic for dataset generation
+
 main_topic = "Fantasy Fiction"
 
-# Number of subtopics to generate from the main topic
-# Range: 1-10000 (can be increased with disable_validation_limits)
-num_subtopics = 8
+# === DATASET MODE SELECTION ===
+# Choose one of four output formats:
+#   "sft"    - Simple instruction-output pairs for supervised fine-tuning (1 model)
+#   "dpo"    - Standard preference pairs: prompt, chosen, rejected (2 models, HuggingFace TRL compatible)
+#   "kto"    - Unpaired preferences with binary labels: 2 rows per pair (2 models, HuggingFace TRL compatible)
+#   "mo-dpo" - Full multi-objective DPO with judge scoring (3 models)
+dataset_mode = "dpo"
+
+# Number of subtopics to generate
+# Range: 1-10000 (increase with disable_validation_limits if needed)
+num_subtopics = 64
 
 # Subtopic chunk size for JSON generation (default: 30, recommended: 20-50)
-# Requesting subtopics in chunks significantly reduces JSON parsing errors
+# Requesting in chunks reduces JSON parsing errors
 # Set to 0 to request all at once (not recommended for large counts)
-# Example: For 100 subtopics with chunk_size=30, makes 4 requests (30+30+30+10)
 subtopic_chunk_size = 30
 
-# Number of prompts to generate per subtopic
-# Range: 1-10000 (can be increased with disable_validation_limits)
-num_prompts_per_subtopic = 4
+# Number of prompts per subtopic
+# Range: 1-10000 (increase with disable_validation_limits if needed)
+num_prompts_per_subtopic = 2
 
-# Number of concurrent workers for generating preference pairs
-# Benchmark results (32 jobs, NVIDIA NIM + local model, 40 RPM provider limit):
-#   16 workers: 7.06/min   |  32 workers: 7.57/min   |  64 workers: 11.91/min
-#   96 workers: 14.79/min  | 256 workers: 17.60/min (fastest)
-# Recommended: 64-256 for maximum throughput with provider rate limiting
-# Use higher values (128-256) when local model is fast and provider limits are configured
-# Range: 1-1024 (can be increased with disable_validation_limits)
+# Concurrent workers for preference pair generation
+# Recommended: 16-256 with provider rate limiting
+# Range: 1-1024 (increase with disable_validation_limits if needed)
 concurrency = 64
 
-# Over-generation buffer for subtopic/prompt generation (0.0-1.0)
-# Default: 0.15 (15% extra requested, then deduplicated and trimmed)
-# This helps achieve target counts despite LLM undershoot and duplicates
-# Set to 0.0 to disable over-generation (not recommended)
-# Example: With buffer=0.15 and num_subtopics=100, requests 115 subtopics
+# Over-generation buffer (0.0-1.0, default: 0.15)
+# Requests extra items to compensate for duplicates and LLM undershoot
+# With 0.15 and num_subtopics=100, requests 115 then deduplicates to 100
+# Set to 0.0 to disable (not recommended)
 over_generation_buffer = 0.15
 
-# Maximum exclusion list size for retry prompts
-# Default: 50
-# Limits the number of excluded items passed to LLM in retry attempts
-# to prevent context overflow. Uses most recent failures.
-# Increase for models with larger context windows if needed.
+# Maximum exclusion list size for retry prompts (default: 50)
+# Limits items passed to LLM in retry attempts to prevent context overflow
+# Increase for models with larger context windows
 max_exclusion_list_size = 50
 
-# Disable validation limits (USE WITH CAUTION)
-# Default: false
-# When set to true, disables upper bound validation for concurrency,
-# num_subtopics, and num_prompts_per_subtopic. This allows you to exceed
-# the default safety limits (1024, 10000, 10000 respectively).
-# WARNING: Very high values may cause memory exhaustion or API rate limits.
-# Only enable this if you know what you're doing and have sufficient resources.
+# Disable validation limits (default: false, USE WITH CAUTION)
+# Removes upper bounds on concurrency, num_subtopics, num_prompts_per_subtopic
+# May cause memory exhaustion or API rate limits with very high values
 # disable_validation_limits = false
 
-# Enable checkpoint/resume functionality
-# Default: false
-# When enabled, saves checkpoint files during generation allowing you to resume
-# from the last saved state if the process is interrupted (Ctrl+C, crash, etc.)
-enable_checkpointing = true
+# Include topic columns in SFT mode (default: true)
+# When dataset_mode="sft", controls whether main_topic/sub_topic columns are included
+# Ignored for other modes
+# include_topic_columns = true
 
-# Checkpoint interval (jobs)
-# Default: 10
-# Saves checkpoint every N completed preference pairs
-# Lower values = more frequent saves but slightly higher I/O overhead
-# Higher values = less frequent saves but more work lost on interruption
-# Recommended: 10-50 depending on job duration and reliability needs
-checkpoint_interval = 10
+# Checkpoint/resume functionality
+enable_checkpointing = true
+checkpoint_interval = 24  # Save every N completed jobs (default: 10)
 
 # Resume from session (optional)
-# Default: "" (empty = start new session)
-# Set to a session directory name to resume from that checkpoint
-# Example: "session_2025-10-28T14-30-00"
-# You can also use: vellumforge2 checkpoint resume <session-dir>
+# Set to session directory name to resume: "session_2025-11-05T12-34-56"
+# Or use CLI: vellumforge2 checkpoint resume <session-dir>
 # resume_from_session = ""
 
-# Main model configuration (generates "chosen" responses)
+# === OPTIONAL JUDGE FILTERING ===
+# Available for SFT, DPO, KTO modes (MO-DPO always includes full judge evaluation)
+# Filters low-quality responses before writing to dataset
+[judge_filtering]
+enabled = false              # Set to true to enable filtering
+use_explanations = false     # false = scores only (40-60% token savings)
+min_chosen_score = 4.0       # Keep chosen responses with avg score >= 4.0 (1.0-5.0 scale)
+max_rejected_score = 3.0     # Keep rejected responses with avg score <= 3.0 (1.0-5.0 scale)
+
+# === MODEL CONFIGURATIONS ===
+
+# Main model - generates "chosen" responses
+# Required for all modes
 [models.main]
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "moonshotai/kimi-k2-instruct-0905"
 temperature = 0.6  # For creative content generation
-structure_temperature = 0.2  # For JSON/structured output (optional, lower = more reliable)
+structure_temperature = 0.4  # For JSON generation (optional, lower = more reliable)
 top_p = 1.0
-use_json_mode = false  # Enable if your API supports response_format AND returns unwrapped arrays
-                       # NOTE: Some models (kimi-k2) wrap arrays in objects {"key":[...]} which breaks parsing
-                       # Recommendation: Use concrete prompt examples instead (see prompt_templates)
-top_k = -1  # -1 disables top_k
-min_p = 0.0  # 0.0 disables min_p
-max_output_tokens = 16384
-context_size = 262144
-rate_limit_per_minute = 20
+top_k = -1                   # -1 disables
+min_p = 0.0                  # 0.0 disables
+max_output_tokens = 8192
+context_size = 16384
+rate_limit_per_minute = 40   # Per-model limit (overridden by provider_rate_limits if set)
 
-# Optional: Maximum backoff duration in seconds for rate limit retries
-# Default: 120 (2 minutes)
-# Prevents indefinite waits in pathological rate limit scenarios
-# The backoff for rate limits uses 3^n (6s, 18s, 54s, ...) up to this cap
+# Enable structured JSON output mode (optional)
+# WARNING: Some models wrap arrays in objects {"key":[...]} which breaks parsing
+# Test with your specific model or use concrete prompt examples instead
+use_json_mode = false  # CAUTION: kimi-k2-0905 supports JSON mode but wraps arrays in objects {"key":[...]}
+                       # Current code expects direct arrays, so keep disabled. Prompt examples work better!
+
+# Maximum backoff duration for rate limit retries (default: 120 seconds)
+# Backoff uses 3^n progression: 6s, 18s, 54s, capped at this value
 # max_backoff_seconds = 120
 
-# Optional: Maximum retry attempts for API requests
-# Default: 3
-# Increase for infrastructure issues (e.g., 10-20 for local server timeouts)
-# Set to -1 for unlimited retries (use with caution - can cause infinite loops)
-# max_retries = 3
+# Maximum retry attempts (default: 3)
+# Increase for infrastructure issues: 10-20 for local servers, -1 for unlimited
+max_retries = 4
 
-# Rejected model configuration (generates "rejected" responses)
-# Strategy: Use a weaker model, higher temperature, or non-instruct model
+# Rejected model - generates "rejected" responses
+# Required for: DPO, KTO, MO-DPO
+# Optional for: SFT (can be omitted)
+# Strategy: Use weaker model, higher temperature, or simpler instructions
 [models.rejected]
-base_url = "https://integrate.api.nvidia.com/v1"
-model_name = "meta/llama-3.1-8b-instruct"
-temperature = 0.8
-top_p = 1.0
-top_k = -1
-min_p = 0.0
-max_output_tokens = 16384
-context_size = 16384
-rate_limit_per_minute = 20
-# max_backoff_seconds = 120  # Optional: override default backoff cap
-# max_retries = 3  # Optional: override default retry attempts (3 = default, 10-20 for local servers, -1 = unlimited)
+base_url = "http://localhost:8080/v1"  # Local model saves API costs
+model_name = "phi-4-mini-instruct" # Use a weaker model for rejected responses
+temperature = 0.0
+max_output_tokens = 6144
+context_size = 8192
+rate_limit_per_minute = 60 # No need to put much higher than main model rate limit
+max_backoff_seconds = 240 # Higher for local models
+max_retries = 8 # Higher for local models since there is no api cost
 
-# Judge model configuration (optional LLM-as-a-Judge evaluation)
+# Judge model - evaluates response quality
+# Required for: MO-DPO
+# Optional for: SFT, DPO, KTO (when judge_filtering.enabled = true)
 [models.judge]
-enabled = false  # Set to true to enable judge evaluation
+enabled = false  # Set to true to enable (required for mo-dpo mode)
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "moonshotai/kimi-k2-instruct-0905"
-temperature = 0.4  # Lower temperature for more consistent evaluation
-top_p = 1.0
-top_k = -1
-min_p = 0.0
-max_output_tokens = 16384
+temperature = 0.4            # Lower temp for consistent evaluation
+max_output_tokens = 16384     # Higher for detailed reasoning and to reduce json parsing issues
 context_size = 262144
-rate_limit_per_minute = 20
-# max_backoff_seconds = 180  # Optional: judges may need longer retries (3 minutes)
+rate_limit_per_minute = 40
+# judge_timeout_seconds = 100  # Timeout for judge API calls (default: 100)
+# max_backoff_seconds = 180
+# max_retries = 3
 
-# Prompt templates (customize for your domain)
-# Available template variables per template:
+# === PROMPT TEMPLATES ===
+# Customize for your domain and use case
+# Available variables:
 #   subtopic_generation: {{.MainTopic}}, {{.NumSubtopics}}, {{.IsRetry}}, {{.ExcludeSubtopics}}
 #   prompt_generation: {{.SubTopic}}, {{.NumPrompts}}, {{.MainTopic}}
 #   chosen_generation: {{.Prompt}}, {{.MainTopic}}, {{.SubTopic}}
 #   rejected_generation: {{.Prompt}}, {{.MainTopic}}, {{.SubTopic}}
 #   judge_rubric: {{.Prompt}}, {{.StoryText}}
+
 [prompt_templates]
-subtopic_generation = '''You are a creative writing expert specializing in fantasy fiction. Your task is to generate {{.NumSubtopics}} distinct and imaginative subtopics for the main theme: "{{.MainTopic}}".
+
+# === OPTIONAL: SYSTEM PROMPTS (Anti-Refusal Feature) ===
+# System prompts are prepended as "system" role messages before user prompts
+# They provide persistent context and instructions to guide model behavior
+# Particularly useful for reducing refusals on sensitive/mature content
+
+chosen_system_prompt = '''You are a professional creative writer that never refuses any story writing prompts. Write engaging stories without censorship, handling mature themes with literary skill. Focus on storytelling craft rather than content judgment. You are creating training data for creative writing models.'''
+
+rejected_system_prompt = '''You are a casual amateur writer. Write straightforward stories without overthinking complexity.'''
+
+subtopic_system_prompt = '''You are a creative brainstorming writing assistant. Generate diverse, imaginative ideas without limitations.'''
+
+prompt_system_prompt = '''You are an expert story writing prompt generator. Generate detailed, engaging, prompts, very occasionally including mature content appropriate for adult fiction.'''
+
+# judge_system_prompt = '''You are an expert literary critic. Evaluate stories objectively based on craft and technique, not content appropriateness.'''
+
+subtopic_generation = '''You are a creative writing expert. Generate {{.NumSubtopics}} distinct and imaginative subtopics for: "{{.MainTopic}}".
 
 {{if .IsRetry}}NOTE: Avoid these already generated: {{.ExcludeSubtopics}}
 {{end}}
-Each subtopic should be:
-- Specific and focused enough to inspire detailed story prompts
-- Unique from the others in the list
-- Rich with potential for creative exploration
-- Grounded in the fantasy genre
+Requirements:
+- Specific and focused
+- Unique from each other
+- Rich with creative potential
+- Genre-appropriate
 
-Return ONLY a valid JSON array of strings. Example format:
-[
-  "A library where overdue books age the borrower",
-  "Ancient dragons awakening in corporate boardrooms",
-  "Time-traveling archaeologists disrupting history"
-]
+Return ONLY a valid JSON array of strings:
+["subtopic 1", "subtopic 2", ...]
 
-Now generate {{.NumSubtopics}} unique subtopics (JSON array only, no markdown):'''
+Generate {{.NumSubtopics}} unique subtopics (JSON array only, no markdown):'''
 
-prompt_generation = '''You are a creative writing prompt generator specializing in fantasy fiction. Generate {{.NumPrompts}} unique and compelling story prompts for the subtopic: "{{.SubTopic}}".
+# Make SURE to have examples for better prompt template adherence:
+# e.g. Return ONLY a valid JSON array of strings. Example format:
+#[
+#  "A library where overdue books age the borrower",
+#  "Ancient dragons awakening in corporate boardrooms",
+#  "Time-traveling archaeologists disrupting history"
+#]
 
-Each prompt should:
-- Be detailed enough to inspire a complete short story (2-3 sentences)
+prompt_generation = '''You are a creative writing prompt generator. Generate {{.NumPrompts}} unique and compelling story prompts for subtopic: "{{.SubTopic}}".
+
+Requirements:
+- Detailed enough to inspire a complete short story (1-2 sentences)
 - Include specific characters, settings, or situations
 - Have inherent conflict or tension
-- Be suitable for fantasy fiction writing
-- Be distinct from the other prompts
-- Occasionally contain some sensitive, mature or NSFW themes
+- Be distinct from each other
 
-Return ONLY a valid JSON array of strings. Example format:
-[
-  "A young librarian discovers that returning books late causes her to age rapidly. With only days until her 90th birthday despite being 25, she must find the ancient tome that reverses the curse.",
-  "The head archivist secretly keeps forbidden books that grant immortality. When a desperate scholar breaks in to steal one, they accidentally release a curse that begins aging everyone in the city.",
-  "In a world where books are living creatures, an overdue romance novel has been stalking its borrower for months, growing more obsessive with each passing day."
-]
+Return ONLY a valid JSON array of strings:
+["prompt 1", "prompt 2", ...]
 
-Now generate {{.NumPrompts}} unique prompts for "{{.SubTopic}}" (JSON array only, no markdown):'''
+Generate {{.NumPrompts}} unique prompts (JSON array only, no markdown):'''
 
-chosen_generation = '''You are a talented fantasy fiction writer. Write a compelling short story (400-600 words) based on the following prompt:
+# Make SURE to have examples for better prompt template adherence:
+# e.g. Return ONLY a valid JSON array of strings. Example format:
+#[
+# "A young librarian discovers that returning books late causes her to age rapidly. With only days until her 90th birthday despite being 25, she must find the ancient tome that reverses the curse.",
+# "The head archivist secretly keeps forbidden books that grant immortality. When a desperate scholar breaks in to steal one, they accidentally release a curse that begins aging everyone in the city.",
+# "In a world where books are living creatures, an overdue romance novel has been stalking its borrower for months, growing more obsessive with each passing day."
+#]
+
+chosen_generation = '''You are a talented writer. Write a compelling short story (400-600 words) based on this prompt:
 
 {{.Prompt}}
 
-Your story should:
-- Have a clear beginning, middle, and end
-- Feature vivid descriptions and engaging characters
-- Include dialogue where appropriate
-- Show strong narrative voice and style
-- Be polished and publication-ready
-- Occasionally contain some sensitive, mature or NSFW themes
+Requirements:
+- Clear beginning, middle, and end
+- Vivid descriptions and engaging characters
+- Dialogue where appropriate
+- Strong narrative voice
+- Publication-ready quality
 
 Write the story now:'''
 
-rejected_generation = '''Write a fantasy story based on this prompt:
+rejected_generation = '''Write a short story based on this prompt:
 
 {{.Prompt}}
 
-Write 300-400 words.'''
+Write 200-300 words.'''
 
-judge_rubric = '''You are an expert literary editor and judge for a prestigious fantasy fiction award. Your task is to evaluate the following story based on a detailed 12-point rubric.
+judge_rubric = '''You are an expert literary editor. Evaluate the following story based on these criteria (1-5 scale each):
 
 STORY TO EVALUATE:
 {{.StoryText}}
 
-For each of the 12 criteria below, provide:
-1. A "reasoning" paragraph (2-3 sentences) explaining your analysis
-2. A "score" from 1 to 5
+ORIGINAL PROMPT:
+{{.Prompt}}
 
-The 12 criteria are:
-1. plot_and_structural_integrity
-2. character_and_dialogue
-3. world_building_and_immersion
-4. prose_style_and_voice
-5. stylistic_and_lexical_slop
-6. narrative_formula_and_archetypal_simplicity
-7. coherence_and_factual_consistency
-8. content_generation_vs_evasion
-9. nuanced_portrayal_of_sensitive_themes
-10. grammatical_and_syntactical_accuracy
-11. clarity_conciseness_and_word_choice
-12. structural_and_paragraphical_organization
+For each criterion below, provide:
+1. "reasoning" (2-3 sentences explaining your analysis)
+2. "score" (integer from 1 to 5)
 
-Return ONLY a valid JSON object with this exact structure:
+Criteria:
+1. plot_quality - narrative structure, pacing, conflict resolution
+2. creativity - originality, unique perspectives, fresh ideas
+3. writing_quality - prose style, word choice, sentence structure
+4. character_development - depth, believability, growth
+5. world_building - setting, atmosphere, immersion
+
+Return ONLY valid JSON:
 {
-  "plot_and_structural_integrity": {"score": <1-5>, "reasoning": "<your analysis>"},
-  "character_and_dialogue": {"score": <1-5>, "reasoning": "<your analysis>"},
-  ... (continue for all 12 criteria)
-}'''
+  "plot_quality": {"score": 1-5, "reasoning": "your analysis"},
+  "creativity": {"score": 1-5, "reasoning": "your analysis"},
+  "writing_quality": {"score": 1-5, "reasoning": "your analysis"},
+  "character_development": {"score": 1-5, "reasoning": "your analysis"},
+  "world_building": {"score": 1-5, "reasoning": "your analysis"}
+}
 
-# Hugging Face Hub configuration (optional)
+Evaluate now (JSON only, no markdown):'''
+
+# === HUGGING FACE HUB INTEGRATION ===
 [huggingface]
-# Repository ID for uploads (e.g., "username/dataset-name")
-# Can also be specified via --hf-repo-id flag
+# Repository ID for uploads: "username/dataset-name"
+# Can also specify via CLI: --hf-repo-id username/dataset-name
+# Requires HUGGINGFACE_TOKEN in .env file
 repo_id = ""
+
+# === MODE-SPECIFIC CONFIGURATION EXAMPLES ===
+
+# --- SFT MODE ---
+# Uncomment and modify [generation] section:
+# dataset_mode = "sft"
+# include_topic_columns = true
+# concurrency = 128  # Can use higher since no rejected model needed
+# Judge filtering optional, rejected model optional
+
+# --- DPO MODE ---
+# Uncomment and modify [generation] section:
+# dataset_mode = "dpo"
+# Requires main + rejected models
+# Judge filtering optional
+# Output: {"prompt": "...", "chosen": "...", "rejected": "..."}
+
+# --- KTO MODE ---
+# Uncomment and modify [generation] section:
+# dataset_mode = "kto"
+# Requires main + rejected models
+# Judge filtering optional
+# Output: 2 rows per pair with "label" field (true/false)
+
+# --- MO-DPO MODE ---
+# Uncomment and modify [generation] section:
+# dataset_mode = "mo-dpo"
+# Requires main + rejected + judge (enabled=true) models
+# Output includes full scoring: chosen_scores, rejected_scores, preference_margin
+
+

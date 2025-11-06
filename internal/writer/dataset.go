@@ -58,6 +58,7 @@ func NewDatasetWriter(sessionMgr *SessionManager, logger *slog.Logger, resumeMod
 
 // WriteRecord writes a single record to the in-memory buffer and returns its index
 // The record will be written to file during Close()
+// This is used for MO-DPO mode (full feature set)
 func (dw *DatasetWriter) WriteRecord(record models.DatasetRecord) (int, error) {
 	dw.mu.Lock()
 	defer dw.mu.Unlock()
@@ -67,6 +68,58 @@ func (dw *DatasetWriter) WriteRecord(record models.DatasetRecord) (int, error) {
 	dw.records = append(dw.records, record)
 
 	return index, nil
+}
+
+// WriteSFTRecord writes an SFT record directly to file (bypasses buffer)
+func (dw *DatasetWriter) WriteSFTRecord(record models.SFTRecord) error {
+	dw.mu.Lock()
+	defer dw.mu.Unlock()
+
+	data, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("failed to marshal SFT record: %w", err)
+	}
+
+	if _, err := dw.file.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("failed to write SFT record: %w", err)
+	}
+
+	return nil
+}
+
+// WriteDPORecord writes a DPO record directly to file (bypasses buffer)
+func (dw *DatasetWriter) WriteDPORecord(record models.DPORecord) error {
+	dw.mu.Lock()
+	defer dw.mu.Unlock()
+
+	data, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("failed to marshal DPO record: %w", err)
+	}
+
+	if _, err := dw.file.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("failed to write DPO record: %w", err)
+	}
+
+	return nil
+}
+
+// WriteKTORecord writes a KTO record directly to file (bypasses buffer)
+// KTO mode generates 2 rows per preference pair (one chosen, one rejected)
+func (dw *DatasetWriter) WriteKTORecord(record models.KTORecord) error {
+	dw.mu.Lock()
+	defer dw.mu.Unlock()
+
+	data, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("failed to marshal KTO record: %w", err)
+	}
+
+	if _, err := dw.file.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("failed to write KTO record: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateRecord updates a previously written record with judge results
@@ -111,16 +164,31 @@ func (dw *DatasetWriter) Flush() error {
 }
 
 // Close flushes all records and closes the dataset file
+// This method holds the lock for the entire operation to prevent any concurrent
+// updates during the close sequence (defensive programming for MO-DPO mode)
 func (dw *DatasetWriter) Close() error {
-	// Flush all buffered records to disk
-	if err := dw.Flush(); err != nil {
-		return fmt.Errorf("failed to flush records: %w", err)
+	dw.mu.Lock()
+	defer dw.mu.Unlock()
+
+	// Flush all buffered records to disk (inline to maintain lock)
+	dw.logger.Info("Flushing records to disk before close", "count", len(dw.records))
+	for i, record := range dw.records {
+		data, err := json.Marshal(record)
+		if err != nil {
+			return fmt.Errorf("failed to marshal record %d: %w", i, err)
+		}
+
+		if _, err := dw.file.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("failed to write record %d: %w", i, err)
+		}
 	}
 
+	// Sync to ensure all data is written to disk
 	if err := dw.file.Sync(); err != nil {
 		dw.logger.Warn("Failed to sync dataset file", "error", err)
 	}
 
+	// Close the file
 	if err := dw.file.Close(); err != nil {
 		return fmt.Errorf("failed to close dataset file: %w", err)
 	}

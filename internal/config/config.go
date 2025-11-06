@@ -4,7 +4,17 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/lamim/vellumforge2/pkg/models"
 )
+
+// JudgeFilteringConfig holds optional judge-based filtering settings
+type JudgeFilteringConfig struct {
+	Enabled          bool    `toml:"enabled"`            // Enable judge-based filtering
+	UseExplanations  bool    `toml:"use_explanations"`   // Include reasoning in judge responses (false = scores only)
+	MinChosenScore   float64 `toml:"min_chosen_score"`   // Minimum average score for chosen responses (1.0-5.0)
+	MaxRejectedScore float64 `toml:"max_rejected_score"` // Maximum average score for rejected responses (1.0-5.0)
+}
 
 // Config represents the complete application configuration
 type Config struct {
@@ -14,21 +24,24 @@ type Config struct {
 	HuggingFace          HuggingFaceConfig      `toml:"huggingface"`
 	ProviderRateLimits   map[string]int         `toml:"provider_rate_limits"`   // Global rate limits per provider (requests per minute)
 	ProviderBurstPercent int                    `toml:"provider_burst_percent"` // Burst capacity as percentage (1-50, default: 15)
+	JudgeFiltering       JudgeFilteringConfig   `toml:"judge_filtering"`        // Optional judge-based quality filtering
 }
 
 // GenerationConfig holds generation-specific settings
 type GenerationConfig struct {
-	MainTopic               string  `toml:"main_topic"`
-	NumSubtopics            int     `toml:"num_subtopics"`
-	SubtopicChunkSize       int     `toml:"subtopic_chunk_size"` // Request subtopics in chunks (0=all at once, default: 30)
-	NumPromptsPerSubtopic   int     `toml:"num_prompts_per_subtopic"`
-	Concurrency             int     `toml:"concurrency"`
-	OverGenerationBuffer    float64 `toml:"over_generation_buffer"`    // Buffer percentage (0.0-1.0, default 0.15)
-	MaxExclusionListSize    int     `toml:"max_exclusion_list_size"`   // Max items in exclusion list (default 50)
-	DisableValidationLimits bool    `toml:"disable_validation_limits"` // Disable upper bound validation (use with caution)
-	EnableCheckpointing     bool    `toml:"enable_checkpointing"`      // Enable checkpoint/resume support
-	CheckpointInterval      int     `toml:"checkpoint_interval"`       // Save checkpoint every N completed jobs (default: 10)
-	ResumeFromSession       string  `toml:"resume_from_session"`       // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
+	MainTopic               string             `toml:"main_topic"`
+	NumSubtopics            int                `toml:"num_subtopics"`
+	SubtopicChunkSize       int                `toml:"subtopic_chunk_size"` // Request subtopics in chunks (0=all at once, default: 30)
+	NumPromptsPerSubtopic   int                `toml:"num_prompts_per_subtopic"`
+	Concurrency             int                `toml:"concurrency"`
+	OverGenerationBuffer    float64            `toml:"over_generation_buffer"`    // Buffer percentage (0.0-1.0, default 0.15)
+	MaxExclusionListSize    int                `toml:"max_exclusion_list_size"`   // Max items in exclusion list (default 50)
+	DisableValidationLimits bool               `toml:"disable_validation_limits"` // Disable upper bound validation (use with caution)
+	EnableCheckpointing     bool               `toml:"enable_checkpointing"`      // Enable checkpoint/resume support
+	CheckpointInterval      int                `toml:"checkpoint_interval"`       // Save checkpoint every N completed jobs (default: 10)
+	ResumeFromSession       string             `toml:"resume_from_session"`       // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
+	DatasetMode             models.DatasetMode `toml:"dataset_mode"`              // Dataset format: sft, dpo, kto, mo-dpo (default: mo-dpo)
+	IncludeTopicColumns     bool               `toml:"include_topic_columns"`     // For SFT mode: include main_topic/sub_topic columns (default: true)
 }
 
 // ModelConfig represents configuration for a single model endpoint
@@ -38,8 +51,6 @@ type ModelConfig struct {
 	Temperature          float64 `toml:"temperature"`
 	StructureTemperature float64 `toml:"structure_temperature"` // Temperature for JSON generation (optional, defaults to temperature)
 	TopP                 float64 `toml:"top_p"`
-	TopK                 int     `toml:"top_k"`
-	MinP                 float64 `toml:"min_p"`
 	MaxOutputTokens      int     `toml:"max_output_tokens"`
 	ContextSize          int     `toml:"context_size"`
 	RateLimitPerMinute   int     `toml:"rate_limit_per_minute"`
@@ -52,11 +63,16 @@ type ModelConfig struct {
 
 // PromptTemplates holds all customizable prompt templates
 type PromptTemplates struct {
-	SubtopicGeneration string `toml:"subtopic_generation"`
-	PromptGeneration   string `toml:"prompt_generation"`
-	ChosenGeneration   string `toml:"chosen_generation"`
-	RejectedGeneration string `toml:"rejected_generation"`
-	JudgeRubric        string `toml:"judge_rubric"`
+	SubtopicGeneration   string `toml:"subtopic_generation"`
+	PromptGeneration     string `toml:"prompt_generation"`
+	ChosenGeneration     string `toml:"chosen_generation"`
+	RejectedGeneration   string `toml:"rejected_generation"`
+	JudgeRubric          string `toml:"judge_rubric"`
+	ChosenSystemPrompt   string `toml:"chosen_system_prompt"`   // Optional system prompt for chosen generation
+	RejectedSystemPrompt string `toml:"rejected_system_prompt"` // Optional system prompt for rejected generation
+	SubtopicSystemPrompt string `toml:"subtopic_system_prompt"` // Optional system prompt for subtopic generation
+	PromptSystemPrompt   string `toml:"prompt_system_prompt"`   // Optional system prompt for prompt generation
+	JudgeSystemPrompt    string `toml:"judge_system_prompt"`    // Optional system prompt for judge evaluation
 }
 
 // HuggingFaceConfig holds Hugging Face Hub settings
@@ -88,6 +104,23 @@ func (c *Config) Validate() error {
 	// Validate provider burst percent range
 	if c.ProviderBurstPercent < 1 || c.ProviderBurstPercent > 50 {
 		return fmt.Errorf("provider_burst_percent must be between 1 and 50 (got %d)", c.ProviderBurstPercent)
+	}
+
+	// Set default dataset mode if not specified
+	if c.Generation.DatasetMode == "" {
+		c.Generation.DatasetMode = models.DatasetModeMODPO // Default to current behavior
+	}
+	// Validate dataset mode
+	validModes := []models.DatasetMode{models.DatasetModeSFT, models.DatasetModeDPO, models.DatasetModeKTO, models.DatasetModeMODPO}
+	validMode := false
+	for _, mode := range validModes {
+		if c.Generation.DatasetMode == mode {
+			validMode = true
+			break
+		}
+	}
+	if !validMode {
+		return fmt.Errorf("generation.dataset_mode must be one of: sft, dpo, kto, mo-dpo (got %s)", c.Generation.DatasetMode)
 	}
 
 	// Validate generation config
@@ -138,17 +171,23 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	// Validate rejected model exists
+	// Validate rejected model exists (unless SFT mode)
 	rejectedModel, ok := c.Models["rejected"]
 	if !ok {
-		return fmt.Errorf("models.rejected is required")
-	}
-	if err := validateModelConfig("rejected", rejectedModel); err != nil {
-		return err
+		if c.Generation.DatasetMode != models.DatasetModeSFT {
+			return fmt.Errorf("models.rejected is required for dataset_mode=%s", c.Generation.DatasetMode)
+		}
+		// Warn if missing in SFT mode
+		fmt.Fprintf(os.Stderr, "WARNING: models.rejected not configured for SFT mode - only chosen responses will be generated\n")
+	} else {
+		if err := validateModelConfig("rejected", rejectedModel); err != nil {
+			return err
+		}
 	}
 
 	// Validate judge model if enabled
-	if judgeModel, ok := c.Models["judge"]; ok && judgeModel.Enabled {
+	judgeModel, judgeExists := c.Models["judge"]
+	if judgeExists && judgeModel.Enabled {
 		if err := validateModelConfig("judge", judgeModel); err != nil {
 			return err
 		}
@@ -157,12 +196,50 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// MO-DPO mode requires judge
+	if c.Generation.DatasetMode == models.DatasetModeMODPO {
+		if !judgeExists || !judgeModel.Enabled {
+			return fmt.Errorf("dataset_mode=mo-dpo requires models.judge with enabled=true")
+		}
+	}
+
+	// Validate judge filtering config
+	if c.JudgeFiltering.Enabled {
+		if !judgeExists || !judgeModel.Enabled {
+			return fmt.Errorf("judge_filtering.enabled=true requires models.judge with enabled=true")
+		}
+		if c.JudgeFiltering.MinChosenScore < 1.0 || c.JudgeFiltering.MinChosenScore > 5.0 {
+			return fmt.Errorf("judge_filtering.min_chosen_score must be between 1.0 and 5.0 (got %.2f)", c.JudgeFiltering.MinChosenScore)
+		}
+		if c.JudgeFiltering.MaxRejectedScore < 1.0 || c.JudgeFiltering.MaxRejectedScore > 5.0 {
+			return fmt.Errorf("judge_filtering.max_rejected_score must be between 1.0 and 5.0 (got %.2f)", c.JudgeFiltering.MaxRejectedScore)
+		}
+		// Set default thresholds if not specified
+		if c.JudgeFiltering.MinChosenScore == 0 {
+			c.JudgeFiltering.MinChosenScore = 4.0
+		}
+		if c.JudgeFiltering.MaxRejectedScore == 0 {
+			c.JudgeFiltering.MaxRejectedScore = 3.0
+		}
+	}
+
+	// Warn if judge filtering is enabled in MO-DPO mode (redundant)
+	if c.Generation.DatasetMode == models.DatasetModeMODPO && c.JudgeFiltering.Enabled {
+		fmt.Fprintf(os.Stderr, "WARNING: judge_filtering is redundant in mo-dpo mode (judge scoring is always included)\n")
+	}
+
 	// Validate prompt templates
 	if c.PromptTemplates.SubtopicGeneration == "" {
 		return fmt.Errorf("prompt_templates.subtopic_generation is required")
 	}
 	if c.PromptTemplates.PromptGeneration == "" {
 		return fmt.Errorf("prompt_templates.prompt_generation is required")
+	}
+	if c.PromptTemplates.ChosenGeneration == "" {
+		return fmt.Errorf("prompt_templates.chosen_generation is required")
+	}
+	if c.PromptTemplates.RejectedGeneration == "" {
+		return fmt.Errorf("prompt_templates.rejected_generation is required")
 	}
 
 	return nil
@@ -177,6 +254,9 @@ func validateModelConfig(name string, mc ModelConfig) error {
 	}
 	if mc.Temperature < 0 || mc.Temperature > 2 {
 		return fmt.Errorf("models.%s.temperature must be between 0 and 2", name)
+	}
+	if mc.StructureTemperature > 0 && (mc.StructureTemperature < 0 || mc.StructureTemperature > 2) {
+		return fmt.Errorf("models.%s.structure_temperature must be between 0 and 2", name)
 	}
 	if mc.TopP < 0 || mc.TopP > 1 {
 		return fmt.Errorf("models.%s.top_p must be between 0 and 1", name)

@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"testing"
+
+	"github.com/lamim/vellumforge2/pkg/models"
 )
 
 func TestValidate(t *testing.T) {
@@ -19,6 +21,7 @@ func TestValidate(t *testing.T) {
 					NumSubtopics:          2,
 					NumPromptsPerSubtopic: 2,
 					Concurrency:           4,
+					DatasetMode:           models.DatasetModeDPO, // DPO mode doesn't require judge
 				},
 				Models: map[string]ModelConfig{
 					"main": {
@@ -43,6 +46,8 @@ func TestValidate(t *testing.T) {
 				PromptTemplates: PromptTemplates{
 					SubtopicGeneration: "template1",
 					PromptGeneration:   "template2",
+					ChosenGeneration:   "template3",
+					RejectedGeneration: "template4",
 				},
 			},
 			wantErr: false,

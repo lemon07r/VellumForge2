@@ -9,6 +9,16 @@ import (
 
 // Load reads and parses the configuration file and environment variables
 func Load(configPath string) (*Config, *Secrets, error) {
+	// Check file size before reading (prevent OOM attacks)
+	const maxConfigSize = 10 * 1024 * 1024 // 10MB
+	fileInfo, err := os.Stat(configPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to stat config file: %w", err)
+	}
+	if fileInfo.Size() > maxConfigSize {
+		return nil, nil, fmt.Errorf("config file too large: %d bytes (max %d bytes)", fileInfo.Size(), maxConfigSize)
+	}
+
 	// Read config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -64,12 +74,7 @@ func applyDefaults(cfg *Config) {
 		if model.TopP == 0 {
 			model.TopP = 1.0
 		}
-		if model.TopK == 0 {
-			model.TopK = -1 // -1 means disabled
-		}
-		if model.MinP == 0 {
-			model.MinP = 0.0
-		}
+
 		if model.MaxOutputTokens == 0 {
 			model.MaxOutputTokens = 4096
 		}
@@ -115,4 +120,20 @@ func applyDefaults(cfg *Config) {
 	if cfg.PromptTemplates.JudgeRubric == "" {
 		cfg.PromptTemplates.JudgeRubric = GetDefaultJudgeTemplate()
 	}
+
+	// Apply default system prompts if not provided (optional)
+	// Note: System prompts are optional and can be left empty
+	// Uncomment these lines to enable default system prompts that reduce refusals:
+	// if cfg.PromptTemplates.ChosenSystemPrompt == "" {
+	// 	cfg.PromptTemplates.ChosenSystemPrompt = GetDefaultChosenSystemPrompt()
+	// }
+	// if cfg.PromptTemplates.SubtopicSystemPrompt == "" {
+	// 	cfg.PromptTemplates.SubtopicSystemPrompt = GetDefaultSubtopicSystemPrompt()
+	// }
+	// if cfg.PromptTemplates.PromptSystemPrompt == "" {
+	// 	cfg.PromptTemplates.PromptSystemPrompt = GetDefaultPromptSystemPrompt()
+	// }
+	// if cfg.PromptTemplates.JudgeSystemPrompt == "" {
+	// 	cfg.PromptTemplates.JudgeSystemPrompt = GetDefaultJudgeSystemPrompt()
+	// }
 }

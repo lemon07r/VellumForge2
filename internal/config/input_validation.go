@@ -108,6 +108,11 @@ func (c *Config) validateTemplateSizes() error {
 		{"chosen_generation", c.PromptTemplates.ChosenGeneration},
 		{"rejected_generation", c.PromptTemplates.RejectedGeneration},
 		{"judge_rubric", c.PromptTemplates.JudgeRubric},
+		{"chosen_system_prompt", c.PromptTemplates.ChosenSystemPrompt},
+		{"rejected_system_prompt", c.PromptTemplates.RejectedSystemPrompt},
+		{"subtopic_system_prompt", c.PromptTemplates.SubtopicSystemPrompt},
+		{"prompt_system_prompt", c.PromptTemplates.PromptSystemPrompt},
+		{"judge_system_prompt", c.PromptTemplates.JudgeSystemPrompt},
 	}
 
 	for _, tmpl := range templates {

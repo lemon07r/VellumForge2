@@ -39,6 +39,7 @@ Thumbs.db
 tmp/
 temp/
 *.benchmark_backup
+.pkg.tar.zst
 
 # Test Report Folder
 REPORTS/
@@ -57,3 +58,5 @@ pampa*
 
 # Agents
 AGENTS.md
+WARP.md
+CLAUDE.md

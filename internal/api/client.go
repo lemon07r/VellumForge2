@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lamim/vellumforge2/internal/config"
@@ -26,6 +27,14 @@ const (
 	// DefaultMaxBackoffDuration is the default maximum backoff duration
 	DefaultMaxBackoffDuration = 2 * time.Minute
 )
+
+// isLocalEndpoint checks if an endpoint is a local address
+func isLocalEndpoint(endpoint string) bool {
+	return strings.Contains(endpoint, "://127.0.0.1") ||
+		strings.Contains(endpoint, "://localhost") ||
+		strings.Contains(endpoint, "://[::1]") ||
+		strings.Contains(endpoint, "://0.0.0.0")
+}
 
 // Client handles HTTP requests to OpenAI-compatible API endpoints
 type Client struct {
@@ -64,6 +73,33 @@ func (c *Client) SetProviderRateLimits(limits map[string]int, burstPercent int) 
 // SetMaxRetries sets the maximum number of retry attempts
 func (c *Client) SetMaxRetries(maxRetries int) {
 	c.maxRetries = maxRetries
+}
+
+// GetEffectiveRateLimit returns the effective rate limit for a model, considering provider-level limits
+// Returns: (effectiveRPM, burstCapacity, usingProviderLimit)
+func (c *Client) GetEffectiveRateLimit(modelCfg config.ModelConfig) (int, int, bool) {
+	providerName := config.GetProviderName(modelCfg.BaseURL)
+
+	// Check if provider-level rate limit is configured
+	if c.providerRateLimits != nil {
+		if providerRPM, ok := c.providerRateLimits[providerName]; ok {
+			// Use provider limit with configurable burst
+			burstPercent := c.providerBurstPercent
+			if burstPercent == 0 {
+				burstPercent = 15 // Default
+			}
+			// Calculate burst capacity: base rate + (base rate * burst percentage)
+			// Example: 40 RPM with 15% burst = 40 * (100 + 15) / 100 = 46
+			burstCapacity := max((providerRPM*(100+burstPercent))/100, 3)
+			return providerRPM, burstCapacity, true
+		}
+	}
+
+	// Fall back to model-level rate limit
+	// Model limiters use fixed 20% burst
+	modelRPM := modelCfg.RateLimitPerMinute
+	burstCapacity := max(modelRPM/5, 5)
+	return modelRPM, burstCapacity, false
 }
 
 // ChatCompletion sends a chat completion request to the specified model
@@ -143,7 +179,7 @@ func (c *Client) ChatCompletion(
 
 			c.logger.Warn("Retrying API request",
 				"attempt", attempt,
-				"max_retries", c.maxRetries,
+				"max_retries", maxAttempts,
 				"backoff", sleepDuration,
 				"model", modelCfg.ModelName,
 				"is_rate_limit", lastErr != nil && c.isRateLimitError(lastErr))
@@ -203,7 +239,8 @@ func (c *Client) ChatCompletionStructured(
 		tempCfg.Temperature = modelCfg.StructureTemperature
 		c.logger.Debug("Using structure_temperature for JSON generation",
 			"structure_temp", modelCfg.StructureTemperature,
-			"regular_temp", modelCfg.Temperature)
+			"original_temp", modelCfg.Temperature,
+			"actual_temp_used", tempCfg.Temperature)
 	}
 
 	// Call regular ChatCompletion with modified config
@@ -244,7 +281,10 @@ func (c *Client) doRequest(
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		c.logger.Debug("API request", "endpoint", endpoint, "has_key", true, "key_length", len(apiKey))
 	} else {
-		c.logger.Warn("API request without key", "endpoint", endpoint)
+		// Only warn about missing API key for non-local endpoints
+		if !isLocalEndpoint(endpoint) {
+			c.logger.Warn("API request without key", "endpoint", endpoint)
+		}
 	}
 
 	// Send request

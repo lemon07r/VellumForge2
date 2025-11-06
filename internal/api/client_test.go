@@ -75,8 +75,9 @@ func TestChatCompletion_Success(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
-	if len(resp.Choices) != 1 {
+	if resp.Choices == nil || len(resp.Choices) != 1 {
 		t.Fatalf("Expected 1 choice, got %d", len(resp.Choices))
 	}
 	if resp.Choices[0].Message.Content != "Test response" {

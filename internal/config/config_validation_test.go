@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/lamim/vellumforge2/pkg/models"
 )
 
 func TestValidateUpperBounds(t *testing.T) {
@@ -246,6 +248,7 @@ func TestValidateUpperBounds(t *testing.T) {
 					Concurrency:           1024,  // At max
 					OverGenerationBuffer:  1.0,   // At max
 					MaxExclusionListSize:  50,
+					DatasetMode:           models.DatasetModeDPO, // DPO mode doesn't require judge
 				},
 				Models: map[string]ModelConfig{
 					"main": {
@@ -270,6 +273,8 @@ func TestValidateUpperBounds(t *testing.T) {
 				PromptTemplates: PromptTemplates{
 					SubtopicGeneration: "test",
 					PromptGeneration:   "test",
+					ChosenGeneration:   "test",
+					RejectedGeneration: "test",
 				},
 			},
 			wantErr: false,
@@ -284,6 +289,7 @@ func TestValidateUpperBounds(t *testing.T) {
 					Concurrency:           1,
 					OverGenerationBuffer:  0.0,
 					MaxExclusionListSize:  1,
+					DatasetMode:           models.DatasetModeDPO, // DPO mode doesn't require judge
 				},
 				Models: map[string]ModelConfig{
 					"main": {
@@ -308,6 +314,8 @@ func TestValidateUpperBounds(t *testing.T) {
 				PromptTemplates: PromptTemplates{
 					SubtopicGeneration: "test",
 					PromptGeneration:   "test",
+					ChosenGeneration:   "test",
+					RejectedGeneration: "test",
 				},
 			},
 			wantErr: false,
@@ -342,10 +350,11 @@ func TestDisableValidationLimits(t *testing.T) {
 			cfg: Config{
 				Generation: GenerationConfig{
 					MainTopic:               "Test",
-					NumSubtopics:            50000, // > 10000 but allowed
-					NumPromptsPerSubtopic:   20000, // > 10000 but allowed
-					Concurrency:             2048,  // > 1024 but allowed
-					DisableValidationLimits: true,  // Validation disabled
+					NumSubtopics:            50000,                 // > 10000 but allowed
+					NumPromptsPerSubtopic:   20000,                 // > 10000 but allowed
+					Concurrency:             2048,                  // > 1024 but allowed
+					DisableValidationLimits: true,                  // Validation disabled
+					DatasetMode:             models.DatasetModeDPO, // DPO mode doesn't require judge
 				},
 				Models: map[string]ModelConfig{
 					"main": {
@@ -370,6 +379,8 @@ func TestDisableValidationLimits(t *testing.T) {
 				PromptTemplates: PromptTemplates{
 					SubtopicGeneration: "test",
 					PromptGeneration:   "test",
+					ChosenGeneration:   "test",
+					RejectedGeneration: "test",
 				},
 			},
 			wantErr: false, // Should pass with disabled validation
@@ -407,6 +418,8 @@ func TestDisableValidationLimits(t *testing.T) {
 				PromptTemplates: PromptTemplates{
 					SubtopicGeneration: "test",
 					PromptGeneration:   "test",
+					ChosenGeneration:   "test",
+					RejectedGeneration: "test",
 				},
 			},
 			wantErr: true, // Should fail - validation enabled

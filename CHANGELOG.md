@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] - 2025-11-05
+
+### Added
+- **Multiple Dataset Modes**: Support for four different training formats
+  - `sft` - Simple instruction-output pairs for supervised fine-tuning (1 model required)
+  - `dpo` - Standard preference pairs: prompt, chosen, rejected (2 models, HuggingFace TRL compatible)
+  - `kto` - Unpaired preferences with binary labels (2 models, HuggingFace TRL KTOTrainer compatible)
+  - `mo-dpo` - Full multi-objective DPO with detailed judge scoring (3 models)
+  - Configure via `dataset_mode` in `[generation]` section
+  - Separate write methods for each format in dataset writer
+- **Judge Filtering**: Optional quality control for SFT, DPO, KTO modes
+  - Filter responses before dataset generation based on quality scores
+  - `judge_filtering.enabled` configuration option
+  - `use_explanations = false` for scores only (40-60% token savings vs full evaluation)
+  - `min_chosen_score` and `max_rejected_score` thresholds
+  - Async parallel evaluation during generation (no additional latency)
+  - MO-DPO mode always includes full judge evaluation
+- **SFT Mode Topic Columns**: Configurable `include_topic_columns` option
+  - Controls whether main_topic/sub_topic columns are included in SFT output
+  - Default: true (includes columns)
+  - Set to false for minimal instruction-output format
+
+### Changed
+- **Configuration Structure**: Enhanced config validation and organization
+  - Added `JudgeFilteringConfig` struct for filtering settings
+  - Added `DatasetMode` type with validation
+  - Improved error messages for invalid mode configurations
+  - Model requirements validated based on selected mode
+- **Worker Logic**: Refactored preference pair generation for mode support
+  - Separate handling for SFT (no rejected), DPO/KTO (rejected required), MO-DPO (judge required)
+  - Judge filtering integrated into worker pipeline
+  - Records filtered before writing based on score thresholds
+- **Judge Evaluation**: Enhanced judge functionality
+  - Support for score-only evaluation (no explanations)
+  - Compatible with filtering mode
+  - Maintains full evaluation for MO-DPO mode
+- **Dataset Writer**: Multi-format output support
+  - `writeRecord()` dispatches to mode-specific methods
+  - `writeSFTRecord()` for SFT format
+  - `writeDPORecord()` for DPO format
+  - `writeKTORecord()` for KTO format (2 rows per pair)
+  - `writeMODPORecord()` for MO-DPO format (unchanged)
+
+### Documentation
+- **Complete Documentation Consolidation**: Restructured all documentation
+  - Consolidated README.md with comprehensive feature overview
+  - Rewrote GETTING_STARTED.md with step-by-step tutorial and troubleshooting
+  - Rewrote DATASET_MODES.md with detailed specifications for all four modes
+  - Combined all config examples into single comprehensive configs/config.example.toml
+  - Removed split documentation structure (docs/ directory)
+  - Removed AI-style writing and emojis throughout
+  - All information verified against codebase
+  - Professional, technical writing style
+- **Configuration Reference**: Single config.example.toml with complete inline documentation
+  - All options documented with defaults and recommendations
+  - Mode-specific configuration sections
+  - Real-world values and examples
+- **Archived Documentation**: Moved README_OLD.md to REPORTS/README_OLD_v1.4.10.md
+- **Created Reports**:
+  - REPORTS/DOCUMENTATION_UPDATE_2025-11-05.md - Complete consolidation summary
+  - REPORTS/DOCUMENTATION_CONSOLIDATION_2025-11-05.md - Initial analysis (superseded)
+
+### Fixed
+- Configuration validation now checks model requirements based on dataset mode
+- Judge model validation only required when judge filtering enabled or mo-dpo mode
+
+---
+
 ## [1.4.11] - 2025-10-31
 
 ### Fixed

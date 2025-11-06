@@ -28,6 +28,7 @@ func TestNewManager(t *testing.T) {
 
 	if mgr == nil {
 		t.Fatal("NewManager returned nil")
+		return
 	}
 
 	if mgr.sessionDir != tempDir {

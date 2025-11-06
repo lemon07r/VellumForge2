@@ -1,513 +1,239 @@
 # VellumForge2
 
-**VellumForge2** is a highly configurable, and easy to use open-source command-line tool for synthetically generating high-quality **Direct Preference Optimization (DPO)** datasets using Large Language Models (LLMs) written in Golang. It implements a high performance hierarchical generation pipeline with optional LLM-as-a-Judge evaluation to create preference pairs suitable for fine-tuning language models and supports checkpointing for session resumption.
+High-performance synthetic dataset generator for LLM training. Generates DPO, SFT, KTO, and MO-DPO datasets using any OpenAI-compatible API with hierarchical generation pipeline, checkpoint/resume support, and optional LLM-as-Judge evaluation.
 
-## Key Features
+```bash
+./bin/vellumforge2 run --config config.toml
+```
 
-### **Hierarchical Generation Pipeline**
-- Generate subtopics from a main theme
-- Create diverse prompts for each subtopic
-- Produce preference pairs (chosen/rejected responses) with customizable story generation templates
-- **Smart over-generation strategy** for 95%+ count accuracy (requests 115% of target, deduplicates, single retry if needed)
+## Features
 
-### **Provider-Agnostic API Support**
-- Works with any OpenAI-compatible API endpoint
-- Supports OpenAI, NVIDIA, Anthropic, Together AI, local servers (llama.cpp, kobold.cpp, Ollama, LM Studio, etc)
-- Enhanced rate limit handling with exponential backoff (6s, 18s, 54s for 429 errors)
+### Multiple Dataset Formats
+- **SFT** - Simple instruction-output pairs for supervised fine-tuning
+- **DPO** - Standard preference pairs (prompt, chosen, rejected) compatible with HuggingFace TRL
+- **KTO** - Unpaired preferences with binary labels compatible with HuggingFace TRL KTOTrainer
+- **MO-DPO** - Full multi-objective DPO with detailed judge scoring for reward modeling
 
-### **LLM-as-a-Judge Evaluation** (Optional)
-- Automated quality assessment with configurable rubrics
-- Structured scoring across multiple criteria
-- "One-to-many" hybrid schema with score totals and detailed per-criterion reasoning
-- JSON sanitization to handle unescaped newlines from LLM responses
-- Preference margin calculation for advanced DPO training
+### High Performance
+- Concurrent worker pool supporting 64-256 parallel requests
+- Provider-level and per-model rate limiting with configurable burst capacity
+- Checkpoint/resume for interrupted sessions
+- Asynchronous judge evaluation (non-blocking)
+- Smart over-generation strategy achieving 95%+ count accuracy
+- Robust 4-strategy JSON parsing with 99%+ success rate
 
-### **High Performance & Reliability**
-- Concurrent worker pool for parallel API requests (supports 64-256 workers)
-- **Provider-level rate limiting** with configurable burst capacity
-- Per-model rate limiting with token bucket algorithm
-- Intelligent retry logic for rate limits (3^n backoff)
-- **Asynchronous judge evaluation** for non-blocking job completion
-- **Pre-validation layer** prevents JSON parse failures (99%+ success rate)
-- Robust JSON extraction with proper bracket matching
-- Auto-fixes truncated JSON responses
-- Case-insensitive deduplication of generated items
-- **Checkpoint/resume** for interrupted sessions with async I/O
+### Provider Agnostic
+Works with any OpenAI-compatible API: OpenAI, NVIDIA NIM, Anthropic, Together AI, llama.cpp, Ollama, LM Studio, kobold.cpp, vLLM, and more.
 
-### **Rich Output & Logging**
-- JSONL format compatible with DPO training frameworks
-- Session-based organization with ISO 8601 timestamped directories (`session_YYYY-MM-DDTHH-MM-SS`)
-- Dual logging - JSON to file (`session.log`) + text to stdout
-- Comprehensive error logging with full response context
-- Generation statistics with failure rate tracking
-- Checkpoint files for session state persistence
+### Configurable Pipeline
+- Hierarchical generation: Main topic → Subtopics → Prompts → Preference pairs
+- Custom prompt templates at every stage
+- Optional LLM-as-Judge quality filtering (40-60% token savings vs full evaluation)
+- Flexible rate limiting strategies
 
-### **Hugging Face Hub Integration**
-- Native NDJSON commit API implementation (no external dependencies)
-- One-command dataset uploads
-- Automatic repository creation
-- Selective file uploads (dataset + config only, excludes logs)
-- Uploads config as `vf2.toml` to Hub for clarity
-
-#### Check out the [Changelog](CHANGELOG.md) for all new features
+### Hugging Face Integration
+One-command dataset uploads with automatic repository creation using native NDJSON commit API (no external dependancies like HF CLI required).
 
 ## Installation
 
 ### Prebuilt Binaries
 
-If you don't want to compile from source binaries are built for all platforms (Windows, Linux, MacOS x86_64 and MacOS arm64) automatically by github workflows, triggered by new release tags. 
-
-It's a good idea to also download the example configs to help get started.
-
-If you have issues with the latest release try downloading binaries for an older version. 
+Download from [releases page](https://github.com/lemon07r/vellumforge2/releases) for Linux, macOS (x86_64/ARM64), and Windows.
 
 ### From Source
 
 ```bash
-# Clone the repository
 git clone https://github.com/lemon07r/vellumforge2.git
 cd vellumforge2
-
-# Install dependencies
-make install
-
-# Build the binary
 make build
-
-# The binary will be in ./bin/vellumforge2
-```
-
-### Cross-Platform Builds
-
-```bash
-# Build for all platforms
-make build-all
-
-# Or build for specific platforms
-make build-linux
-make build-darwin
-make build-windows
+# Binary at ./bin/vellumforge2
 ```
 
 ## Quick Start
 
-Also check out the [Getting Started Guide](GETTING_STARTED.md)
-
-### 1. Set Up Configuration
-
 ```bash
-# Copy example files
+# 1. Copy configuration template
 cp configs/config.example.toml config.toml
 cp configs/.env.example .env
 
-# Edit config.toml with your desired settings
-# RECOMMENDED: Use the Even Better TOML VSCode extension
-# Edit .env with your API keys
-```
+# 2. Edit .env with your API keys
+# NVIDIA_API_KEY=nvapi-your-key
+# OPENAI_API_KEY=sk-your-key
 
-### 2. Run Generation
+# 3. Edit config.toml with your settings
+# Choose dataset_mode, configure models, customize prompts
 
-```bash
-# Basic usage
+# 4. Generate dataset
 ./bin/vellumforge2 run --config config.toml
 
-# With verbose logging (recommended for debugging)
-./bin/vellumforge2 run --config config.toml --verbose
-
-# With Hugging Face upload
-./bin/vellumforge2 run --config config.toml --upload-to-hf --hf-repo-id username/my-dataset
+# 5. Results in output/session_YYYY-MM-DDTHH-MM-SS/dataset.jsonl
 ```
 
-### 3. Results
-
-All outputs are saved in a timestamped session directory:
-
-```
-output/
-└── session_2025-10-27T12-34-56/
-    ├── dataset.jsonl       # Your DPO dataset
-    ├── config.toml.bak     # Configuration snapshot
-    └── session.log         # Structured JSON logs
-```
-
-## Example Datasets
-
-Check out some datasets generated by this tool here:
-
-https://huggingface.co/collections/lemon07r/vellumforge2-datasets
-
-Configs used to generate these datasets can be found in the included vf2.toml under the files tab.
-
-This collection currently includes:
-
-- lemon07r/VellumK2-Fantasy-DPO-Tiny-01 - **A 128 row dataset that can be useful for testing or validation**
-- lemon07r/VellumK2-Fantasy-DPO-Small-01 - **A 1k row dataset that can be useful light training or in combination with other datasets**
-- lemon07r/VellumK2-Fantasy-DPO-01 (planned) - **A 10k row dataset perfect for training with or without other datasets**
-
-These are all generated using Kimi-K2-0905 from Nvidia NIM API for topics, prompts, chosen responses and judge scoring. We use Phi-4-mini-instruct (Q6K from unsloth) run locally over llama.cpp server w/ ROCm (on a 6700 XT) for rejected responses. All of these datasets can be used for SFT just using prompt + chosen response columns, DPO using prompt + the chosen/rejected pairs, reward training using the score totals, and/or MORL training using the judge responses. See the dataset format section of the README.md further down below for more information. 
+See [GETTING_STARTED.md](GETTING_STARTED.md) for step-by-step tutorial.
 
 ## Configuration
 
-### Example Configuration (config.toml)
+Minimal configuration:
 
 ```toml
-# Provider-level rate limiting (v1.4.4+)
-[provider_rate_limits]
-nvidia = 40  # All NVIDIA models share this global limit
-
-provider_burst_percent = 15  # Burst capacity (default: 15%, range: 1-50%)
-
 [generation]
 main_topic = "Fantasy Fiction"
 num_subtopics = 64
 num_prompts_per_subtopic = 2
-concurrency = 64  # Recommended: 64-256 workers for maximum throughput, you can can run the benchmark script to evaluate the optimal number of workers with your config
-over_generation_buffer = 0.15  # Request 15% extra to hit target counts
-max_exclusion_list_size = 50  # Limit retry prompt size
-# disable_validation_limits = false  # Set true to exceed default limits
+concurrency = 64
+dataset_mode = "dpo"  # Options: sft, dpo, kto, mo-dpo
 
 [models.main]
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "moonshotai/kimi-k2-instruct-0905"
-temperature = 0.7
-max_output_tokens = 16384
-context_size = 262144
-rate_limit_per_minute = 40  # Respects API quotas
-
-[models.rejected]
-base_url = "https://integrate.api.nvidia.com/v1"
-model_name = "meta/llama-3.1-8b-instruct"
-temperature = 1.0  # Higher temp for lower quality responses
-max_output_tokens = 16384
+temperature = 0.6
+max_output_tokens = 8192
 rate_limit_per_minute = 40
-# Try using a small local model for rejected responses to save API usage and avoid rate limiting
 
-[models.judge]
-enabled = true  # Set to false to disable judge evaluation
-base_url = "https://integrate.api.nvidia.com/v1"
-model_name = "moonshotai/kimi-k2-instruct-0905"
-temperature = 0.4  # Lower temp for consistent evaluation
-max_output_tokens = 16384
-rate_limit_per_minute = 40
+[models.rejected]  # Required for DPO/KTO/MO-DPO
+base_url = "http://localhost:8080/v1" # Default URL for llama.cpp local server, but you can use any api of choice
+model_name = "phi-4-mini-instruct"
+temperature = 0.0
+max_output_tokens = 4096
 
 [prompt_templates]
-# Generation templates are REQUIRED
-chosen_generation = '''You are a talented creative writer.
-Write a compelling story (400-600 words) based on this prompt:
-
-{{.Prompt}}
-
-Your story should have vivid descriptions and engaging characters.'''
-
-rejected_generation = '''Write a story based on this prompt:
-
-{{.Prompt}}
-
-Write 300-400 words.'''
-
-# Judge rubric template (optional if judge disabled), this increase dataset generation time
-judge_rubric = '''Evaluate the following story according to multiple criteria...'''
+chosen_generation = "Write a compelling story (400-600 words): {{.Prompt}}"
+rejected_generation = "Write a simple story (200-300 words): {{.Prompt}}"
 ```
 
-### Environment Variables (.env)
+Complete configuration reference in [configs/config.example.toml](configs/config.example.toml).
 
-```bash
-API_KEY=your-api-key-here
-# Generic API Key (RECOMMENDED for any OpenAI-compatible provider)
-# This works with ANY OpenAI-compatible API endpoint (Nebius, OpenRouter, local servers, etc.)
-# Just set the base_url in your config.toml and this key will be used automatically
-NVIDIA_API_KEY=nvapi-xxxxx
-OPENAI_API_KEY=sk-xxxxx
-HUGGING_FACE_TOKEN=hf_xxxxx
-```
+## Dataset Modes
 
-## Dataset Format
+### Mode Selection
 
-### One-to-Many Hybrid Schema
+| Mode | Output Format | Models Required | HuggingFace TRL | Use Case |
+|------|--------------|-----------------|-----------------|----------|
+| sft | instruction → output | Main only | SFTTrainer | Basic fine-tuning |
+| dpo | prompt, chosen, rejected | Main + Rejected | DPOTrainer | Preference optimization |
+| kto | prompt, completion, label | Main + Rejected | KTOTrainer | Unpaired preferences |
+| mo-dpo | Full schema + judge scores | Main + Rejected + Judge | Custom | Multi-objective training |
 
-VellumForge2 uses a flexible "one-to-many" hybrid schema that works seamlessly with:
-- **DPOTrainer**: Use `prompt`, `chosen`, `rejected` columns
-- **RewardTrainer**: Use texts with `chosen_score_total` and `rejected_score_total` as labels
-- **Custom MORL Training**: Parse nested `chosen_scores` and `rejected_scores` for multi-objective training
+### Example Outputs
 
-Using a judge is optional, generate datasets without a judge for DPO only training. Use without rejected responses for SFT training.
-
-Each line in `dataset.jsonl` is a JSON object:
-
+**SFT Format:**
 ```json
 {
-  "main_topic": "Fantasy Fiction",
-  "sub_topic": "Dragon Lore",
-  "prompt": "Write a story about a dragon who is afraid of heights.",
-  "chosen": "Once upon a time, in a cavern of glittering obsidian...",
-  "rejected": "There was a dragon. It was big and green...",
-  
+  "instruction": "Write a fantasy story about dragons",
+  "output": "In the mountains of Eldoria..."
+}
+```
+
+**DPO Format:**
+```json
+{
+  "prompt": "Write a fantasy story about dragons",
+  "chosen": "In the ancient mountains of Eldoria, where mist...",
+  "rejected": "There was a dragon. It was big..."
+}
+```
+
+**KTO Format (2 rows per pair):**
+```json
+{"prompt": "Write about dragons", "completion": "Good story...", "label": true}
+{"prompt": "Write about dragons", "completion": "Bad story...", "label": false}
+```
+
+**MO-DPO Format:**
+```json
+{
+  "prompt": "Write a fantasy story about dragons",
+  "chosen": "In the mountains...",
+  "rejected": "There was a dragon...",
   "chosen_scores": {
-    "plot_and_structural_integrity": {
-      "score": 5,
-      "reasoning": "Excellent narrative arc with clear causality..."
-    },
-    "creativity_and_originality": {
-      "score": 4,
-      "reasoning": "Fresh take on the dragon archetype..."
-    }
+    "plot_quality": {"score": 5, "reasoning": "Excellent narrative..."},
+    "creativity": {"score": 4, "reasoning": "Fresh perspective..."}
   },
   "rejected_scores": {
-    "plot_and_structural_integrity": {
-      "score": 2,
-      "reasoning": "The plot is disjointed and lacks coherence..."
-    },
-    "creativity_and_originality": {
-      "score": 2,
-      "reasoning": "Relies heavily on standard clichés..."
-    }
+    "plot_quality": {"score": 2, "reasoning": "Minimal development..."},
+    "creativity": {"score": 2, "reasoning": "Generic treatment..."}
   },
-  
   "chosen_score_total": 4.5,
   "rejected_score_total": 2.0,
   "preference_margin": 2.5
 }
 ```
 
-**No data transformation needed** to switch between training frameworks
+See [DATASET_MODES.md](DATASET_MODES.md) for detailed format specifications and configuration examples.
 
-## Advanced Usage
+## Optional Judge Filtering
 
-### Custom Prompt and Response Generation Templates
-
-Customize the entire generation pipeline by editing templates in `config.toml`:
+Available for SFT, DPO, KTO modes. MO-DPO always includes full judge evaluation.
 
 ```toml
-[prompt_templates]
+[judge_filtering]
+enabled = true
+use_explanations = false  # Scores only = 40-60% token savings
+min_chosen_score = 4.0    # Keep chosen responses >= 4.0
+max_rejected_score = 3.0  # Keep rejected responses <= 3.0
 
-# Subtopic generation (with optional retry support)
-subtopic_generation = '''Generate {{.NumSubtopics}} specific subtopics for: {{.MainTopic}}
-
-{{if .IsRetry}}NOTE: Avoid these already generated: {{.ExcludeSubtopics}}
-{{end}}
-Return ONLY a JSON array of subtopics.'''
-
-# Prompt generation  
-prompt_generation = '''Generate {{.NumPrompts}} creative writing prompts for: {{.SubTopic}}
-
-Context: This is part of "{{.MainTopic}}"
-Return ONLY a JSON array of prompts.'''
-
-# Response generation for chosen responses
-chosen_generation = '''You are an expert {{.MainTopic}} writer.
-
-Write a masterful story for this prompt:
-{{.Prompt}}
-
-Requirements:
-- 500-700 words
-- Rich world-building
-- Complex characters
-- Surprising twist ending'''
-
-# Response generation for rejected responses
-rejected_generation = '''Write a basic {{.MainTopic}} story:
-{{.Prompt}}
-
-Keep it simple, 200-300 words.'''
-
-# Judge evaluation (optional)
-judge_rubric = '''Evaluate the following story...'''
+[models.judge]
+enabled = true
+base_url = "https://integrate.api.nvidia.com/v1"
+model_name = "meta/llama-3.1-70b-instruct"
+temperature = 0.4
+max_output_tokens = 2048
 ```
 
-**Available Template Variables:**
+Filters responses before writing to dataset based on quality scores. Use when API budget is limited or training time is expensive.
 
-- **Subtopic Generation:**
-  - `{{.MainTopic}}` - Your main theme
-  - `{{.NumSubtopics}}` - Count to generate (auto-adjusted for over-generation and retry)
-  - `{{.IsRetry}}` - Boolean, true on retry attempts (optional)
-  - `{{.ExcludeSubtopics}}` - Comma-separated list of already generated subtopics (optional, only on retry)
-  
-- **Prompt Generation:**
-  - `{{.SubTopic}}` - The current subtopic
-  - `{{.NumPrompts}}` - Number of prompts to generate
-  - `{{.MainTopic}}` - Main topic (also available here)
+## Rate Limiting
 
-- **Story Generation (chosen_generation, rejected_generation):**
-  - `{{.Prompt}}` - The writing prompt
-  - `{{.MainTopic}}` - Main topic
-  - `{{.SubTopic}}` - Current subtopic
+### Provider-Level Limits
 
-- **Judge Evaluation:**
-  - `{{.Prompt}}` - Original writing prompt
-  - `{{.StoryText}}` - Story to evaluate
-
-### Judge Evaluation Criteria
-
-Customize evaluation criteria with your own rubric:
-
-```toml
-[prompt_templates]
-judge_rubric = '''Evaluate the following story on these criteria:
-
-STORY:
-{{.StoryText}}
-
-Rate each criterion 1-5 and provide reasoning:
-
-Return ONLY valid JSON:
-{
-  "plot_quality": {"score": 1-5, "reasoning": "Detailed analysis..."},
-  "character_depth": {"score": 1-5, "reasoning": "Detailed analysis..."},
-  "writing_style": {"score": 1-5, "reasoning": "Detailed analysis..."}
-}
-'''
-```
-
-**Important**: Judge is flexible - it accepts any criteria the model returns!
-
-### Rate Limiting Strategy
-
-Configure per-model rate limits to respect API quotas and avoid 429 errors:
-
-```toml
-[models.main]
-rate_limit_per_minute = 40  # 40 requests per minute
-
-[generation]
-concurrency = 8  # 8 parallel workers
-```
-
-**Rate Limit Math**: With 8 workers at 40 req/min, you're making ~5 req/min per worker on average.
-
-**Smart Retry Logic**: VellumForge2 automatically applies longer exponential backoff for rate limit errors (6s → 18s → 54s), capped at 2 minutes by default.
-
-**Bencmarking Scripts** See the [Benchmarking README](BENCHMARK_README.md) to see how to evaluate your config.toml against different worker numbers to figure out the most suitable work numbers for your config.
-
-## Configuration Best Practices
-
-### Over-Generation Strategy
-
-VellumForge2 uses an intelligent over-generation strategy to reliably hit target counts:
-
-```toml
-[generation]
-over_generation_buffer = 0.15  # Request 15% extra (configurable: 0.0-1.0)
-max_exclusion_list_size = 50   # Limit retry prompt size
-```
-
-**How it works:**
-1. Request `target × (1 + buffer)` items initially (e.g., 115 for target=100)
-2. Deduplicate results (case-insensitive)
-3. If short, retry once for the difference with exclusion list
-4. Achieves 95%+ accuracy vs 79% with single-shot
-
-**Tuning tips:**
-- Higher buffer (0.25-0.50) for models that frequently undershoot
-- Lower buffer (0.05-0.10) for reliable models to save API calls
-- Set to 0.0 to disable (not recommended)
-
-### Rate Limiting and Backoff
-
-VellumForge2 automatically handles rate limits with intelligent backoff:
-
-- **Standard retries**: 2^n exponential backoff (2s, 4s, 8s...)
-- **Rate limit retries**: 3^n exponential backoff (6s, 18s, 54s...)
-- **Automatic cap**: Maximum 2 minutes per retry (configurable)
-
-```toml
-[models.main]
-rate_limit_per_minute = 40
-max_backoff_seconds = 120  # Optional: override default 2-minute cap
-```
-
-**Tuning tips:**
-- Reduce `max_backoff_seconds` for faster failure detection
-- Increase for heavily rate-limited APIs (up to 300s / 5 minutes)
-- Judge models may need longer caps due to complex responses
-
-### Provider-Level Rate Limiting (v1.4.4+)
+Global rate limits shared across all models from same provider:
 
 ```toml
 [provider_rate_limits]
 nvidia = 40  # All NVIDIA models share this 40 RPM limit
-
-provider_burst_percent = 15  # Configurable burst capacity (1-50%)
-
-[models.main]
-base_url = "https://integrate.api.nvidia.com/v1"
-rate_limit_per_minute = 40  # Ignored when provider limit is set
-
-[models.judge]
-base_url = "https://integrate.api.nvidia.com/v1"  
-rate_limit_per_minute = 40  # Ignored when provider limit is set
+provider_burst_percent = 15  # 15% burst capacity (default)
 ```
 
-**How it works:**
-- Automatic provider detection from base URLs (nvidia, openai, anthropic, together)
-- Provider limit overrides individual model limits
-- All requests to the same provider share a single token bucket
-- Configurable burst capacity balances throughput and compliance
+Takes precedence over per-model limits. Prevents 429 errors when multiple models share one API endpoint.
 
-**Burst Tuning:**
-- **15% (default)**: Balanced performance (6 burst requests at 40 RPM)
-- **20-25%**: Maximum throughput with 128-256 workers (8-10 burst requests)
-- **10-12%**: Minimize rate limit errors (4-5 burst requests)
+### Per-Model Limits
 
-**Use cases:**
-- Multiple models on same provider (main + judge on NVIDIA)
-- High worker counts (64-256) with shared API endpoints
-- Preventing burst overages that cause 429 errors
+Individual model rate limiting:
 
-### Safe Configuration Limits
+```toml
+[models.main]
+rate_limit_per_minute = 40  # Overridden by provider_rate_limits if set
+```
 
-VellumForge2 enforces safety limits to prevent resource exhaustion:
+### Optimization
 
-| Config Field | Min | Max | Recommended |
-|--------------|-----|-----|-------------|
-| `concurrency` | 1 | 1024* | 64-256 (with provider limits) |
-| `num_subtopics` | 1 | 10,000* | 10-500 |
-| `num_prompts_per_subtopic` | 1 | 10,000* | 2-10 |
-| `over_generation_buffer` | 0.0 | 1.0 | 0.15 |
-| `provider_burst_percent` | 1 | 50 | 15 (balanced), 20+ (throughput) |
-| `max_output_tokens` | 1 | `context_size` | Model-specific |
-
-\* _Limits can be disabled by setting `disable_validation_limits = true` (use with caution)_
-
-**Validation**: The config validator checks these limits and provides clear error messages.
-
-**Disabling Limits**: For extreme use cases, you can disable upper bound validation:
+Recommended configuration for high throughput:
 
 ```toml
 [generation]
-disable_validation_limits = true  # USE WITH CAUTION
-concurrency = 2048  # Now allowed
-num_subtopics = 50000  # Now allowed
+concurrency = 128  # Or 256 for high throughput, recommended to test with the bencmark scripts
+
+[provider_rate_limits]
+nvidia = 40
+provider_burst_percent = 20  # Higher burst for better throughput
 ```
 
-**Warning**: Disabling limits may cause memory exhaustion or API rate limit issues. Only use when you have sufficient resources and understand the implications.
+Conservative configuration for avoiding rate limits:
 
-### Graceful Shutdown
+```toml
+[generation]
+concurrency = 32
 
-VellumForge2 v1.2+ supports graceful shutdown via Ctrl+C:
+[provider_rate_limits]
+nvidia = 30
+provider_burst_percent = 10  # Lower burst for fewer 429 errors
+```
 
-- Press **Ctrl+C** once to initiate graceful shutdown
-- Current batch completes, then stops cleanly
-- Partial dataset is saved to session directory
-- Logs show "Generation cancelled by user"
+See [BENCHMARK_README.md](BENCHMARK_README.md) for benchmarking guide using our easy to use benchmark scripts.
 
-**Use cases:**
-- Stop long-running generations early
-- Adjust configuration and restart
-- Respond to resource constraints
+## Checkpoint & Resume
 
-### Checkpoint & Resume
-
-VellumForge2 v1.3+ includes robust checkpoint/resume functionality for interrupted sessions:
-
-**Features:**
-- Automatic state persistence during generation
-- Resume from any interruption (Ctrl+C, crash, system failure)
-- Phase-based checkpointing (subtopics, prompts, preference pairs)
-- Async checkpoint writes for minimal performance impact (<1% overhead)
-- Config validation to prevent incompatible resumes
-
-**Enable checkpointing:**
+Enable automatic checkpointing:
 
 ```toml
 [generation]
@@ -515,353 +241,185 @@ enable_checkpointing = true
 checkpoint_interval = 10  # Save every 10 completed jobs
 ```
 
-**Resume after interruption:**
+Resume interrupted session:
 
 ```bash
-# Option 1: Edit config
-[generation]
-resume_from_session = "session_2025-10-28T14-30-00"
-
-# Then run normally
-./bin/vellumforge2 run --config config.toml
-
-# Option 2: Use CLI command (auto-updates config)
-./bin/vellumforge2 checkpoint resume session_2025-10-28T14-30-00
-```
-
-**Manage checkpoints:**
-
-```bash
-# List all sessions with checkpoint status
+# List available checkpoints
 ./bin/vellumforge2 checkpoint list
 
-# Inspect checkpoint details
-./bin/vellumforge2 checkpoint inspect session_2025-10-28T14-30-00
+# Inspect checkpoint
+./bin/vellumforge2 checkpoint inspect session_2025-11-05T12-34-56
+
+# Resume generation
+./bin/vellumforge2 checkpoint resume session_2025-11-05T12-34-56
 ```
 
-**What's saved:**
-- All completed subtopics
-- All generated prompts
-- Each completed preference pair (job)
-- Cumulative statistics
-- Current phase and progress
+Graceful shutdown with Ctrl+C automatically saves checkpoint.
 
-**Checkpoint file structure:**
+## CLI Commands
+
+### Generate Dataset
+
+```bash
+# Basic generation
+./bin/vellumforge2 run --config config.toml
+
+# With verbose logging
+./bin/vellumforge2 run --config config.toml --verbose
+
+# Upload to Hugging Face
+./bin/vellumforge2 run --config config.toml \
+  --upload-to-hf --hf-repo-id username/my-dataset #--hf-repo-id not required if set in config file
+```
+
+### Checkpoint Management
+
+```bash
+# List checkpoints
+./bin/vellumforge2 checkpoint list
+
+# Inspect checkpoint
+./bin/vellumforge2 checkpoint inspect <session-dir>
+
+# Resume from checkpoint
+./bin/vellumforge2 checkpoint resume <session-dir>
+```
+
+### Other
+
+```bash
+# Show version
+./bin/vellumforge2 --version
+
+# Show help
+./bin/vellumforge2 --help
+```
+
+## Output Structure
 
 ```
 output/
-└── session_2025-10-28T14-30-00/
-    ├── dataset.jsonl       # Incremental results
-    ├── checkpoint.json     # State for resume
-    ├── config.toml.bak     # Config snapshot
-    └── session.log         # Structured logs
+└── session_2025-11-05T12-34-56/
+    ├── dataset.jsonl       # Training dataset
+    ├── config.toml.bak     # Configuration snapshot
+    ├── checkpoint.json     # Resume state (if checkpointing enabled)
+    └── session.log         # Structured JSON logs
 ```
 
-**Use cases:**
-- Long-running generations (10K+ rows)
-- Unstable network connections
-- Experimenting with interrupted partial runs
-- Saving API costs by avoiding restarts from scratch
+## Example Datasets
 
-**Performance:** Checkpoint saves are asynchronous with < 1% throughput impact. Phase transitions use synchronous saves for data integrity.
+Generated with VellumForge2 using Kimi K2 0905 + Phi-4 Instruct:
 
-### Concurrency Tuning
+- [VellumK2-Fantasy-DPO-Tiny-01](https://huggingface.co/datasets/lemon07r/VellumK2-Fantasy-DPO-Tiny-01) - 128 rows
+- [VellumK2-Fantasy-DPO-Small-01](https://huggingface.co/datasets/lemon07r/VellumK2-Fantasy-DPO-Small-01) - 1K rows
+- [VellumK2-Fantasy-DPO-01](https://huggingface.co/datasets/lemon07r/VellumK2-Fantasy-DPO-01) - 10K rows
 
-Adjust worker pool size based on your setup:
-
-```toml
-[generation]
-concurrency = 256  # Maximum throughput (with fast local model + provider limits)
-# or
-concurrency = 64   # Balanced throughput and resource usage
-# or
-concurrency = 16   # Conservative (if hitting rate limits or resource constraints)
-```
-
-**Provider Rate Limiting** (v1.4.4+): Enables safe use of high worker counts
-```toml
-[provider_rate_limits]
-nvidia = 40  # Global limit prevents 429 errors with many workers
-
-provider_burst_percent = 15  # Default: balanced
-# 20-25 for maximum throughput with 128-256 workers
-# 10-12 to minimize rate limit errors
-```
-
-**Recommendation**: Start with `concurrency = 64` and `provider_burst_percent = 15`, then increase workers to 128-256 for maximum throughput if you have a fast local model for rejected responses. You can use the benchmark script to assist with testing your config.toml against different work numbers. See the [Benchmarking Readme](BENCHMARK_README.md), it's as simple as running `./scripts/quick_benchmark.sh 64 128 256` to test the config.toml in your working directory against those three worker numbers.
-
-## Architecture
-
-VellumForge2 follows a modular, concurrent architecture with robust error handling:
-
-```
-┌─────────────────────────────────────────────────┐
-│                CLI (Cobra)                      │
-│            - Flag parsing                       │
-│            - Environment loading                │
-└─────────────┬───────────────────────────────────┘
-              │
-┌─────────────▼───────────────────────────────────┐
-│           Orchestrator                          │
-│  - Hierarchical generation pipeline             │
-│  - Smart over-generation (115% + retry)         │
-│  - Worker pool management                       │
-│  - Pre-validation & deduplication               │
-│  - Generation statistics tracking               │
-└──┬──────────┬──────────┬────────────┬───────────┘
-   │          │          │            │
-   ▼          ▼          ▼            ▼
-┌───────┐ ┌───────┐  ┌───────┐   ┌─────────┐
-│API    │ │Judge  │  │Writer │   │HF Hub   │
-│Client │ │Module │  │       │   │Uploader │
-│       │ │       │  │       │   │         │
-│- Rate │ │- JSON │  │- Dual │   │- NDJSON │
-│ limit │ │ sanit │  │  logs │   │  commit │
-│- Smart│ │- Score│  │- JSONL│   │- Select │
-│ retry │ │ totals│  │ writer│   │  upload │
-└───────┘ └───────┘  └───────┘   └─────────┘
-          │
-          ▼
-     ┌─────────┐
-     │Validator│
-     │         │
-     │- Pre-   │
-     │ validate│
-     │- String │
-     │  array  │
-     │- Dedupe │
-     └─────────┘
-```
-
-### Key Architectural Features
-
-1. **Smart Over-Generation**: Requests 115% of target count, deduplicates, single retry if needed (95%+ accuracy)
-2. **Pre-Validation Layer**: Validates JSON structure before unmarshaling (99%+ parse success)
-3. **Robust JSON Parsing**: Proper bracket matching algorithm handles nested structures, truncated responses, and markdown-wrapped JSON
-4. **Intelligent Retries**: Exponential backoff with longer delays for rate limits
-5. **Dual Logging**: JSON to file for analysis + text to stdout for monitoring
-6. **Selective Uploads**: Only uploads dataset and config to HF Hub (excludes logs)
-7. **JSON Sanitization**: Automatically escapes literal newlines in judge responses
-
-## Development
-
-### Running Tests
-
-```bash
-# Run all tests
-make test
-
-# With coverage report
-make test-coverage
-```
-
-### Linting & Formatting
-
-Make sure you have golangci-lint installed.
-
-```bash
-make lint
-make fmt
-```
+[View all example datasets](https://huggingface.co/collections/lemon07r/vellumforge2-datasets)
 
 ## Troubleshooting
 
-### API Rate Limits (429 Errors)
+### Rate Limit Errors (429)
 
-**Symptoms**: Warnings like "Too Many Requests", generation slowing down
-
-**Solution 1** (v1.4.4+): Use provider-level rate limiting (recommended):
+Reduce concurrency and global limits:
 
 ```toml
 [provider_rate_limits]
-nvidia = 40  # Global limit for all NVIDIA models
-
-provider_burst_percent = 12  # Lower burst reduces errors
+nvidia = 30
 
 [generation]
-concurrency = 64  # Can still use high worker counts
+concurrency = 32
 ```
 
-**Solution 2**: Reduce concurrency (older approach):
+### Getting Fewer Records Than Expected
+
+Increase over-generation buffer:
 
 ```toml
 [generation]
-concurrency = 16  # Lower parallelism
-
-[models.main]
-rate_limit_per_minute = 20  # Conservative per-model limit
+over_generation_buffer = 0.25  # Increase from default 0.15
 ```
-
-**What VellumForge2 Does**: Automatically applies 3^n exponential backoff (6s, 18s, 54s) for rate limit retries.
-
-**Provider Rate Limiting Benefits** (v1.4.4+):
-- Prevents multiple models from exceeding shared provider limits
-- Enables safe use of 64-256 workers with high-throughput local models
-- Better burst control with configurable capacity
-- Benchmark-proven 2.5x throughput improvement vs conservative settings
-
-### Count Mismatches
-
-**Symptoms**: Getting fewer subtopics/prompts than requested (e.g., 271 out of 344)
-
-**Solution**: VellumForge2 automatically handles this with **smart over-generation**:
-- Requests 115% of target count initially (e.g., 395 for 344 target)
-- Deduplicates results (case-insensitive)
-- Makes ONE retry attempt if still short
-- **Achieves 95%+ count accuracy** vs 79% with single-shot
-
-**What you'll see in logs**:
-```
-INFO  Generating subtopics with over-generation strategy target=344 requesting=395 buffer_percent=15
-INFO  Initial subtopic generation complete requested=395 received=390 unique=385 duplicates_filtered=5
-INFO  Target count achieved final_count=344 excess_trimmed=41
-```
-
-**Note**: If retry fails, VellumForge2 gracefully returns partial results and logs a warning. Your dataset will contain the actual count generated.
-
-### Judge Evaluation Failures
-
-**Symptoms**: Warnings like "Judge evaluation failed: invalid character in string literal"
-
-**Cause**: LLMs sometimes generate responses with unescaped newlines
-
-**Solution**: VellumForge2 automatically sanitizes JSON responses. If issues persist:
-- Increase `max_output_tokens` for judge model (e.g., 16384)
-- Simplify judge rubric to reduce response complexity
-- Check judge evaluation warnings in `session.log`
 
 ### JSON Parsing Errors
 
-**Symptoms**: "unexpected end of JSON input" or "invalid character after array element"
-
-**Solution**: VellumForge2 has built-in fixes:
-- Auto-closes truncated JSON arrays
-- Proper bracket matching ignores false matches in strings
-- Extracts JSON from markdown code blocks
-
-If errors persist:
-1. Check prompt templates explicitly request JSON output
-2. Ensure temperature is not too high (< 0.9 recommended)
-3. Verify model supports structured output
+VellumForge2 has 4 fallback parsing strategies achieving 99%+ success rate. If issues persist:
+- Use lower temperature (< 0.9)
+- Ensure templates explicitly request JSON format
+- Set `structure_temperature` lower than `temperature` for JSON generation
 
 ### Out of Memory
 
-For large datasets, reduce concurrency:
+Reduce concurrency:
 
 ```toml
 [generation]
-concurrency = 2  # Minimal parallelism
+concurrency = 32  # Or lower
 ```
 
-### Empty Session Logs
+### Connection Refused for Rejected Model
 
-If logs are empty, check file permissions on the `output/` directory.
+Start local server or use same API endpoint:
 
-## Generation Validation
-
-VellumForge2 provides comprehensive validation warnings:
-
-### Count Validation
-```
-WARN  Subtopic count mismatch expected=64 actual=63 difference=-1
-WARN  Prompt count mismatch expected=126 actual=124 difference=-2
+```toml
+[models.rejected]
+base_url = "https://integrate.api.nvidia.com/v1"
+model_name = "meta/llama-3.1-8b-instruct"  # Smaller model
 ```
 
-### Failure Summary
-```
-WARN  Generation completed with failures failure_rate=1.59% lost_rows=2
-```
+See [GETTING_STARTED.md](GETTING_STARTED.md) for more troubleshooting.
 
-These warnings help diagnose issues but don't fail the entire generation. Check `session.log` for details.
+## Documentation
+
+- [GETTING_STARTED.md](GETTING_STARTED.md) - Step-by-step tutorial
+- [DATASET_MODES.md](DATASET_MODES.md) - Detailed format specifications
+- [BENCHMARK_README.md](BENCHMARK_README.md) - Performance benchmarking guide
+- [CHANGELOG.md](CHANGELOG.md) - Version history
+- [configs/config.example.toml](configs/config.example.toml) - Complete configuration reference
+
+## System Requirements
+
+- Go 1.21+ (for building from source)
+- Memory: 512MB minimum, 2GB+ recommended
+- Network: Stable internet for API calls
+- Disk: ~10MB per 1000 records
 
 ## Contributing
 
-Contributions are welcome! Please:
+Contributions welcome:
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes with tests
-4. Run linting and tests (`make lint && make test`)
+2. Create a feature branch
+3. Make changes with tests
+4. Run `make lint && make test`
 5. Submit a pull request
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file.
 
 ## Citation
 
-If you use VellumForge2 in your research, please cite:
-
 ```bibtex
 @software{vellumforge2,
-  title = {VellumForge2: Synthetic DPO Dataset Generator},
+  title = {VellumForge2: Synthetic Dataset Generator for LLM Training},
   author = {Lamim},
   year = {2025},
   url = {https://github.com/lemon07r/vellumforge2},
-  version = {1.4.4}
+  version = {1.5.0}
 }
 ```
 
 ## Acknowledgments
 
-Built with insights from:
-- [Direct Preference Optimization paper](https://arxiv.org/abs/2305.18290)
-- [sourcegraph/conc](https://github.com/sourcegraph/conc) for concurrency patterns
-- The Hugging Face community for DPO training resources
-- [Moonshot AI](https://www.moonshot.cn/) for the Kimi K2 Instruct model, and also inspiring the rubric style LLM as judge concept for training/datasets
-
-## Documentation
-
-- [Getting Started Guide](GETTING_STARTED.md) - Step-by-step tutorial
-- [Changelog](CHANGELOG.md)
-- [Benchmarking README](BENCHMARK_README.md)
+- [Direct Preference Optimization](https://arxiv.org/abs/2305.18290) by Rafailov et al.
+- [Kahneman-Tversky Optimization](https://arxiv.org/abs/2402.01306) for KTO
+- [HuggingFace TRL](https://github.com/huggingface/trl) for training framework inspiration
 
 ## Support
 
-- [Issue Tracker](https://github.com/lemon07r/vellumforge2/issues)
-- [Discussions](https://github.com/lemon07r/vellumforge2/discussions)
-- Email: [Create an issue for support]
-
-## Roadmap
-
-VellumForge2 is currently considered feature complete, with all intended features and functionality working, and implemented. However there is still room for improvements. Feel free to fork this project to try implementing some of these improvment ideas yourselves. Some I may try to implement in the future myself, but I currently consider them pretty low priority. 
-
-### Completed
-- [x] Hierarchical generation pipeline
-- [x] Concurrent worker pool
-- [x] LLM-as-a-Judge evaluation
-- [x] One-to-many hybrid schema
-- [x] Hugging Face Hub integration (NDJSON)
-- [x] Robust JSON parsing with bracket matching
-- [x] Intelligent retry logic with rate limit handling
-- [x] JSON sanitization for judge responses
-- [x] Generation count validation
-- [x] Dual logging system (JSON + text)
-- [x] Story generation templates
-- [x] **v1.2**: Configurable over-generation buffer
-- [x] **v1.2**: Exclusion list size limits
-- [x] **v1.2**: Backoff cap for rate limits
-- [x] **v1.2**: Graceful shutdown (Ctrl+C)
-- [x] **v1.2**: Config validation with upper bounds
-- [x] **v1.2**: Template caching for performance
-- [x] **v1.2**: Precompiled regex patterns
-- [x] **v1.3**: Resume from checkpoint on failure
-- [x] **v1.4**: Provider-level rate limiting with configurable burst
-- [x] **v1.4**: Asynchronous judge evaluation
-- [x] **v1.4**: Performance logging and benchmarking tools
-
-### Potential Ideas for Future Improvements
-- [ ] Support for additional DPO schema formats
-- [ ] Batch processing mode for large-scale generation
-- [ ] Checkpoint compression for large datasets
-- [ ] Cloud storage backends for checkpoints (S3, GCS)
-- [ ] Web UI for monitoring and configuration
-- [ ] Plugin system for custom judges
-- [ ] Multi-model ensemble evaluation
-- [ ] Export to other formats (Parquet, CSV)
+- [GitHub Issues](https://github.com/lemon07r/vellumforge2/issues) - Bug reports and feature requests
+- [Discussions](https://github.com/lemon07r/vellumforge2/discussions) - Questions and community help
 
 ---
 
-**Status**: **STABLE** (v1.4.11) - Production-ready with provider rate limiting, 2.5x throughput improvements, async judge evaluation, improved retry logic, JSON parser improvements, and comprehensive benchmarking tools
-
-
+Current Version: v1.5.0
+Last Updated: 2025-11-05

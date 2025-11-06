@@ -121,15 +121,6 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Debug: Check if API keys were loaded
-	if verbose {
-		for provider, key := range secrets.APIKeys {
-			if key != "" {
-				fmt.Fprintf(os.Stderr, "Loaded API key for: %s (length: %d)\n", provider, len(key))
-			}
-		}
-	}
-
 	// Determine log level
 	logLevel := slog.LevelInfo
 	if verbose {
@@ -152,8 +143,12 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	}
 	defer func() {
 		if logFile != nil {
-			_ = logFile.Sync()
-			_ = logFile.Close()
+			if err := logFile.Sync(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to sync log file: %v\n", err)
+			}
+			if err := logFile.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close log file: %v\n", err)
+			}
 		}
 	}()
 
@@ -283,6 +278,23 @@ func loadEnvFile(path string) error {
 		if len(parts) == 2 {
 			key := trimSpace(parts[0])
 			value := trimSpace(parts[1])
+
+			// Validate environment variable name
+			if !isValidEnvVarName(key) {
+				return fmt.Errorf("invalid environment variable name: %s (must be alphanumeric with underscores)", key)
+			}
+
+			// Check for restricted environment variables
+			if isRestrictedEnvVar(key) {
+				return fmt.Errorf("restricted environment variable: %s (cannot be set via env file)", key)
+			}
+
+			// Validate value size (prevent DoS)
+			const maxValueSize = 100 * 1024 // 100KB per value
+			if len(value) > maxValueSize {
+				return fmt.Errorf("environment variable value too large: %s (%d bytes, max %d)", key, len(value), maxValueSize)
+			}
+
 			// Remove quotes if present
 			value = trimQuotes(value)
 			if err := os.Setenv(key, value); err != nil {
@@ -292,6 +304,56 @@ func loadEnvFile(path string) error {
 	}
 
 	return nil
+}
+
+// isValidEnvVarName checks if the environment variable name is valid
+// Only allows alphanumeric characters and underscores, must start with letter or underscore
+func isValidEnvVarName(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+
+	// Must start with letter or underscore
+	first := name[0]
+	if (first < 'A' || first > 'Z') && (first < 'a' || first > 'z') && first != '_' {
+		return false
+	}
+
+	// Rest must be alphanumeric or underscore
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isRestrictedEnvVar checks if the environment variable is restricted
+// These variables can affect system behavior and should not be set via env files
+func isRestrictedEnvVar(name string) bool {
+	restricted := []string{
+		"PATH",
+		"LD_PRELOAD",
+		"LD_LIBRARY_PATH",
+		"DYLD_INSERT_LIBRARIES",
+		"DYLD_LIBRARY_PATH",
+		"HOME",
+		"USER",
+		"SHELL",
+		"TMPDIR",
+		"TMP",
+		"TEMP",
+	}
+
+	for _, r := range restricted {
+		if name == r {
+			return true
+		}
+	}
+
+	return false
 }
 
 func splitLines(s string) []string {
@@ -556,8 +618,12 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 	}
 	defer func() {
 		if logFile != nil {
-			_ = logFile.Sync()
-			_ = logFile.Close()
+			if err := logFile.Sync(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to sync log file: %v\n", err)
+			}
+			if err := logFile.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close log file: %v\n", err)
+			}
 		}
 	}()
 
