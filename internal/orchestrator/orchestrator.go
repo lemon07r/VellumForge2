@@ -103,7 +103,7 @@ func New(
 func (o *Orchestrator) Run(ctx context.Context) error {
 	// Store context for judge goroutines to respect cancellation
 	o.ctx = ctx
-	
+
 	var checkpointCloseErr error
 
 	defer func() {

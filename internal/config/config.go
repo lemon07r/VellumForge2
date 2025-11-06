@@ -63,16 +63,16 @@ type ModelConfig struct {
 
 // PromptTemplates holds all customizable prompt templates
 type PromptTemplates struct {
-	SubtopicGeneration      string `toml:"subtopic_generation"`
-	PromptGeneration        string `toml:"prompt_generation"`
-	ChosenGeneration        string `toml:"chosen_generation"`
-	RejectedGeneration      string `toml:"rejected_generation"`
-	JudgeRubric             string `toml:"judge_rubric"`
-	ChosenSystemPrompt      string `toml:"chosen_system_prompt"`      // Optional system prompt for chosen generation
-	RejectedSystemPrompt    string `toml:"rejected_system_prompt"`    // Optional system prompt for rejected generation
-	SubtopicSystemPrompt    string `toml:"subtopic_system_prompt"`    // Optional system prompt for subtopic generation
-	PromptSystemPrompt      string `toml:"prompt_system_prompt"`      // Optional system prompt for prompt generation
-	JudgeSystemPrompt       string `toml:"judge_system_prompt"`       // Optional system prompt for judge evaluation
+	SubtopicGeneration   string `toml:"subtopic_generation"`
+	PromptGeneration     string `toml:"prompt_generation"`
+	ChosenGeneration     string `toml:"chosen_generation"`
+	RejectedGeneration   string `toml:"rejected_generation"`
+	JudgeRubric          string `toml:"judge_rubric"`
+	ChosenSystemPrompt   string `toml:"chosen_system_prompt"`   // Optional system prompt for chosen generation
+	RejectedSystemPrompt string `toml:"rejected_system_prompt"` // Optional system prompt for rejected generation
+	SubtopicSystemPrompt string `toml:"subtopic_system_prompt"` // Optional system prompt for subtopic generation
+	PromptSystemPrompt   string `toml:"prompt_system_prompt"`   // Optional system prompt for prompt generation
+	JudgeSystemPrompt    string `toml:"judge_system_prompt"`    // Optional system prompt for judge evaluation
 }
 
 // HuggingFaceConfig holds Hugging Face Hub settings

@@ -31,7 +31,11 @@ func BenchmarkDatasetWriter_WriteRecord(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer writer.Close()
+	defer func() {
+		if err := writer.Close(); err != nil {
+			b.Fatal(err)
+		}
+	}()
 
 	// Benchmark record
 	record := models.DatasetRecord{
@@ -71,7 +75,11 @@ func BenchmarkDatasetWriter_UpdateRecord(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer writer.Close()
+	defer func() {
+		if err := writer.Close(); err != nil {
+			b.Fatal(err)
+		}
+	}()
 
 	// Add some records
 	record := models.DatasetRecord{
@@ -81,7 +89,7 @@ func BenchmarkDatasetWriter_UpdateRecord(b *testing.B) {
 		Chosen:    "Chosen response",
 		Rejected:  "Rejected response",
 	}
-	
+
 	indices := make([]int, 100)
 	for i := 0; i < 100; i++ {
 		idx, err := writer.WriteRecord(record)
@@ -118,7 +126,7 @@ func BenchmarkDatasetWriter_UpdateRecord(b *testing.B) {
 func BenchmarkDatasetWriter_Close(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		
+
 		// Create temp directory
 		tempDir := b.TempDir()
 		sessionDir := filepath.Join(tempDir, "session_test")
@@ -148,7 +156,7 @@ func BenchmarkDatasetWriter_Close(b *testing.B) {
 			Chosen:    "Chosen response",
 			Rejected:  "Rejected response",
 		}
-		
+
 		for j := 0; j < 100; j++ {
 			_, err := writer.WriteRecord(record)
 			if err != nil {

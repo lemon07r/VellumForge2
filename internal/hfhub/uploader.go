@@ -348,7 +348,9 @@ func generateFileSample(filePath string, sampleSize int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	buffer := make([]byte, sampleSize)
 	n, err := file.Read(buffer)

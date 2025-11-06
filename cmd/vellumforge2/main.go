@@ -278,23 +278,23 @@ func loadEnvFile(path string) error {
 		if len(parts) == 2 {
 			key := trimSpace(parts[0])
 			value := trimSpace(parts[1])
-			
+
 			// Validate environment variable name
 			if !isValidEnvVarName(key) {
 				return fmt.Errorf("invalid environment variable name: %s (must be alphanumeric with underscores)", key)
 			}
-			
+
 			// Check for restricted environment variables
 			if isRestrictedEnvVar(key) {
 				return fmt.Errorf("restricted environment variable: %s (cannot be set via env file)", key)
 			}
-			
+
 			// Validate value size (prevent DoS)
 			const maxValueSize = 100 * 1024 // 100KB per value
 			if len(value) > maxValueSize {
 				return fmt.Errorf("environment variable value too large: %s (%d bytes, max %d)", key, len(value), maxValueSize)
 			}
-			
+
 			// Remove quotes if present
 			value = trimQuotes(value)
 			if err := os.Setenv(key, value); err != nil {
@@ -312,21 +312,21 @@ func isValidEnvVarName(name string) bool {
 	if len(name) == 0 {
 		return false
 	}
-	
+
 	// Must start with letter or underscore
 	first := name[0]
-	if !((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') || first == '_') {
+	if (first < 'A' || first > 'Z') && (first < 'a' || first > 'z') && first != '_' {
 		return false
 	}
-	
+
 	// Rest must be alphanumeric or underscore
 	for i := 1; i < len(name); i++ {
 		c := name[i]
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -346,13 +346,13 @@ func isRestrictedEnvVar(name string) bool {
 		"TMP",
 		"TEMP",
 	}
-	
+
 	for _, r := range restricted {
 		if name == r {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

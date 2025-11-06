@@ -50,8 +50,12 @@ rejected_generation = "Generate rejected response"
 	}
 
 	// Set environment variables
-	os.Setenv("OPENAI_API_KEY", "test-key-123")
-	defer os.Unsetenv("OPENAI_API_KEY")
+	if err := os.Setenv("OPENAI_API_KEY", "test-key-123"); err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		_ = os.Unsetenv("OPENAI_API_KEY")
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
