@@ -142,6 +142,10 @@ for workers in "${WORKER_COUNTS[@]}"; do
     # Update config
     update_worker_count "$workers"
     
+    # Save config used for this run
+    cp "$CONFIG_FILE" "$RESULTS_DIR/config_${workers}w.toml"
+    echo -e "${GREEN}✓${NC} Saved config to config_${workers}w.toml"
+    
     # Run generation
     echo "Running generation..."
     RUN_OUTPUT=$("$BINARY" run --config "$CONFIG_FILE" 2>&1)
@@ -270,13 +274,14 @@ cat >> "$REPORT_FILE" << EOFMD
 **Optimal worker count: $BEST_WORKERS workers**
 - Best throughput: $BEST_THROUGHPUT jobs/min
 
-## Session Directories
+## Test Configurations
 
+Each run used a config with the specified worker count. Config files saved as:
 EOFMD
 
 for result in "${RESULTS[@]}"; do
     IFS='|' read -r workers duration throughput avg_total rate_wait blocking session <<< "$result"
-    echo "- **${workers} workers:** \`$(basename "$session")\`" >> "$REPORT_FILE"
+    echo "- **${workers} workers:** \`config_${workers}w.toml\` (session: \`$(basename "$session")\`)" >> "$REPORT_FILE"
 done
 
 echo ""

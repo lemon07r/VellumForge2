@@ -45,14 +45,21 @@ update_worker_count() {
 RESULTS_CSV="$RESULTS_DIR/results.csv"
 echo "workers,duration_sec,throughput,avg_job_time,rate_wait_ms,blocking_pct" > "$RESULTS_CSV"
 
-echo "Workers,Duration,Throughput,Avg Job,Rate Wait,Blocking" > "$RESULTS_DIR/summary.txt"
-echo "──────────────────────────────────────────────────────────────────" >> "$RESULTS_DIR/summary.txt"
+# Summary with proper column formatting
+{
+    printf "%-10s %-15s %-20s %-18s %-18s %-15s\n" \
+        "Workers" "Duration" "Throughput" "Avg Job Time" "Rate Wait" "Blocking"
+    echo "──────────────────────────────────────────────────────────────────────────────────────────────────"
+} > "$RESULTS_DIR/summary.txt"
 
 for workers in "${WORKER_COUNTS[@]}"; do
     echo ""
     echo -e "${YELLOW}Testing $workers workers...${NC}"
     
     update_worker_count "$workers"
+    
+    # Save config used for this run
+    cp "$CONFIG_FILE" "$RESULTS_DIR/config_${workers}w.toml"
     
     # Run and capture output
     "$BINARY" run --config "$CONFIG_FILE" > "$RESULTS_DIR/run_${workers}w.log" 2>&1
@@ -110,7 +117,11 @@ else:
         
         # Save to CSV
         echo "$workers,$duration,$throughput,$avg_total,$rate_wait,$blocking" >> "$RESULTS_CSV"
-        echo "$workers,$duration_min min,$throughput/min,${avg_total}s,${rate_wait}ms,${blocking}%" >> "$RESULTS_DIR/summary.txt"
+        
+        # Append to formatted summary
+        printf "%-10s %-15s %-20s %-18s %-18s %-15s\n" \
+            "$workers" "${duration_min} min" "${throughput} jobs/min" "${avg_total}s" "${rate_wait}ms" "${blocking}%" \
+            >> "$RESULTS_DIR/summary.txt"
     else
         echo "  Failed to extract metrics"
     fi
