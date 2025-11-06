@@ -148,15 +148,16 @@ func (u *Uploader) Upload(repoID, sessionDir string) error {
 
 		for oid, uploadInfo := range uploadMap {
 			localPath := filePaths[oid]
-			
-			// Log whether we got an upload URL
+
+			// Empty uploadURL means file already exists on server - skip upload (this is normal!)
 			if uploadInfo.UploadURL == "" {
-				u.logger.Warn("Preupload returned no upload URL - file may be cached globally",
+				u.logger.Debug("LFS file already exists on server, skipping upload",
 					"oid", oid,
-					"file", filepath.Base(localPath),
-					"note", "This will likely cause commit to fail")
+					"file", filepath.Base(localPath))
+				continue // Skip upload, file exists
 			}
-			
+
+			// Upload the file to S3/storage
 			if err := u.UploadLFSFileWithRetry(uploadInfo, localPath, MaxRetries); err != nil {
 				return fmt.Errorf("failed to upload LFS file %s: %w", localPath, err)
 			}
@@ -221,12 +222,12 @@ func (u *Uploader) createRepo(repoID string) error {
 	if err == nil && resp.StatusCode == http.StatusOK {
 		_ = resp.Body.Close()
 		u.logger.Warn("Repository already exists - deleting to ensure clean state", "repo_id", repoID)
-		
+
 		// Delete existing repo to avoid LFS cache issues
 		if err := u.deleteRepo(repoID); err != nil {
 			return fmt.Errorf("failed to delete existing repo: %w", err)
 		}
-		
+
 		// Wait for HF to propagate deletion and clear LFS cache
 		// This is necessary because HF's LFS storage is global and cached
 		u.logger.Info("Waiting for HF to propagate deletion", "seconds", 10)
