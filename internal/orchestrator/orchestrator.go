@@ -32,6 +32,20 @@ type judgeUpdate struct {
 	judgeResult *models.JudgeResult
 }
 
+// subtopicTask represents a subtopic prompt generation task
+type subtopicTask struct {
+	subtopic string
+	index    int
+}
+
+// promptResult represents the result of prompt generation for a subtopic
+type promptResult struct {
+	index    int
+	subtopic string
+	prompts  []string
+	err      error
+}
+
 // Orchestrator manages the entire data generation pipeline
 type Orchestrator struct {
 	cfg           *config.Config
@@ -544,18 +558,6 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		"prompt_workers", promptWorkers)
 
 	// Use worker pool for parallel prompt generation
-	type subtopicTask struct {
-		subtopic string
-		index    int
-	}
-
-	type promptResult struct {
-		index    int
-		subtopic string
-		prompts  []string
-		err      error
-	}
-
 	tasksChan := make(chan subtopicTask, len(subtopics))
 	resultsChan := make(chan promptResult, len(subtopics))
 
@@ -589,7 +591,7 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		close(resultsChan)
 	}()
 
-	// Collect results
+	// Collect results with retry support for failures
 	results := make(map[int]promptResult)
 	bar := progressbar.Default(int64(len(subtopics)), "Generating prompts")
 
@@ -604,17 +606,97 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		}
 	}
 
-	// Build jobs in order
+	// Identify failed subtopics
+	var failedSubtopics []string
+	failedIndices := make(map[int]string)
+	for i := 0; i < len(subtopics); i++ {
+		result, ok := results[i]
+		if !ok || result.err != nil {
+			failedSubtopics = append(failedSubtopics, subtopics[i])
+			failedIndices[i] = subtopics[i]
+		}
+	}
+
+	// Retry failed subtopics with exponential backoff
+	if len(failedSubtopics) > 0 && o.cfg.Generation.PromptRetryAttempts > 0 {
+		o.logger.Warn("Retrying failed subtopics",
+			"count", len(failedSubtopics),
+			"max_attempts", o.cfg.Generation.PromptRetryAttempts)
+
+		for attempt := 1; attempt <= o.cfg.Generation.PromptRetryAttempts; attempt++ {
+			if len(failedSubtopics) == 0 {
+				break
+			}
+
+			o.logger.Info("Retry attempt for failed subtopics",
+				"attempt", attempt,
+				"count", len(failedSubtopics))
+
+			// Exponential backoff before retry
+			if attempt > 1 {
+				backoffDuration := time.Duration(1<<uint(attempt-1)) * time.Second
+				o.logger.Info("Backing off before retry", "duration", backoffDuration)
+				time.Sleep(backoffDuration)
+			}
+
+			// Retry failed subtopics
+			retryResults := o.retryFailedSubtopics(ctx, failedSubtopics, failedIndices, promptWorkers)
+
+			// Update results with successful retries
+			var stillFailing []string
+			stillFailingIndices := make(map[int]string)
+			for idx, subtopic := range failedIndices {
+				if retryResult, ok := retryResults[idx]; ok {
+					if retryResult.err == nil {
+						results[idx] = retryResult
+						o.logger.Info("Retry succeeded for subtopic",
+							"subtopic", subtopic,
+							"attempt", attempt)
+					} else {
+						stillFailing = append(stillFailing, subtopic)
+						stillFailingIndices[idx] = subtopic
+					}
+				}
+			}
+
+			failedSubtopics = stillFailing
+			failedIndices = stillFailingIndices
+		}
+	}
+
+	// Calculate success rate
+	successCount := 0
+	for i := 0; i < len(subtopics); i++ {
+		result, ok := results[i]
+		if ok && result.err == nil {
+			successCount++
+		}
+	}
+	successRate := float64(successCount) / float64(len(subtopics))
+
+	o.logger.Info("Prompt generation phase complete",
+		"total_subtopics", len(subtopics),
+		"successful", successCount,
+		"failed", len(failedSubtopics),
+		"success_rate", fmt.Sprintf("%.1f%%", successRate*100))
+
+	// Check if success rate meets minimum threshold
+	if successRate < o.cfg.Generation.MinSuccessRate {
+		return nil, fmt.Errorf("prompt generation success rate (%.1f%%) below minimum threshold (%.1f%%), failed subtopics: %d/%d",
+			successRate*100, o.cfg.Generation.MinSuccessRate*100, len(failedSubtopics), len(subtopics))
+	}
+
+	// Build jobs from successful results (skip failed subtopics)
 	var allJobs []models.GenerationJob
+	var skippedSubtopics []string
 	jobID := 0
 
 	for i := 0; i < len(subtopics); i++ {
 		result, ok := results[i]
 		if !ok || result.err != nil {
-			if ok {
-				return nil, fmt.Errorf("failed to generate prompts for subtopic %q: %w", result.subtopic, result.err)
-			}
-			return nil, fmt.Errorf("missing result for subtopic at index %d", i)
+			// Gracefully skip this subtopic
+			skippedSubtopics = append(skippedSubtopics, subtopics[i])
+			continue
 		}
 
 		for _, p := range result.prompts {
@@ -628,7 +710,70 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 		}
 	}
 
+	// Save partial progress to checkpoint with failure tracking
+	if o.checkpointMgr != nil && len(skippedSubtopics) > 0 {
+		cp := o.checkpointMgr.GetCheckpoint()
+		cp.FailedSubtopics = skippedSubtopics
+		cp.PromptSuccessRate = successRate
+	}
+
+	if len(skippedSubtopics) > 0 {
+		o.logger.Warn("Continuing with partial results - some subtopics skipped",
+			"skipped_count", len(skippedSubtopics),
+			"skipped_subtopics", skippedSubtopics,
+			"successful_jobs", len(allJobs))
+	}
+
 	return allJobs, nil
+}
+
+// retryFailedSubtopics retries prompt generation for failed subtopics
+func (o *Orchestrator) retryFailedSubtopics(ctx context.Context, failedSubtopics []string, failedIndices map[int]string, workers int) map[int]promptResult {
+	tasksChan := make(chan subtopicTask, len(failedSubtopics))
+	resultsChan := make(chan promptResult, len(failedSubtopics))
+
+	// Start workers for retry
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(workerID int) {
+			defer wg.Done()
+			for task := range tasksChan {
+				prompts, err := o.generatePromptsForSubtopic(ctx, task.subtopic)
+				resultsChan <- promptResult{
+					index:    task.index,
+					subtopic: task.subtopic,
+					prompts:  prompts,
+					err:      err,
+				}
+			}
+		}(i)
+	}
+
+	// Send retry tasks
+	for idx, subtopic := range failedIndices {
+		tasksChan <- subtopicTask{subtopic: subtopic, index: idx}
+	}
+	close(tasksChan)
+
+	// Wait for retry workers
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Collect retry results
+	retryResults := make(map[int]promptResult)
+	for result := range resultsChan {
+		retryResults[result.index] = result
+		if result.err != nil {
+			o.logger.Warn("Retry failed for subtopic",
+				"subtopic", result.subtopic,
+				"error", result.err)
+		}
+	}
+
+	return retryResults
 }
 
 // generatePromptsForSubtopic generates prompts for a single subtopic

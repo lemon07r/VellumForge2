@@ -27,8 +27,10 @@ type Checkpoint struct {
 	Subtopics         []string `json:"subtopics"`
 
 	// Phase 2: Prompts (completed = we have all prompts for all subtopics)
-	PromptsComplete bool            `json:"prompts_complete"`
-	Prompts         []GenerationJob `json:"prompts"` // Full job list with IDs
+	PromptsComplete   bool            `json:"prompts_complete"`
+	Prompts           []GenerationJob `json:"prompts"`             // Full job list with IDs
+	FailedSubtopics   []string        `json:"failed_subtopics"`    // Subtopics that failed prompt generation
+	PromptSuccessRate float64         `json:"prompt_success_rate"` // Success rate for prompt generation phase
 
 	// Phase 3: Preference Pairs (track which jobs are done)
 	CompletedJobIDs map[int]bool `json:"completed_job_ids"` // job_id -> true

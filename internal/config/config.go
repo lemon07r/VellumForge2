@@ -36,6 +36,8 @@ type GenerationConfig struct {
 	Concurrency             int                `toml:"concurrency"`
 	OverGenerationBuffer    float64            `toml:"over_generation_buffer"`    // Buffer percentage (0.0-1.0, default 0.15)
 	MaxExclusionListSize    int                `toml:"max_exclusion_list_size"`   // Max items in exclusion list (default 50)
+	MinSuccessRate          float64            `toml:"min_success_rate"`          // Minimum success rate for prompt generation (0.0-1.0, default 0.90)
+	PromptRetryAttempts     int                `toml:"prompt_retry_attempts"`     // Number of retry attempts for failed subtopics (default 2)
 	DisableValidationLimits bool               `toml:"disable_validation_limits"` // Disable upper bound validation (use with caution)
 	EnableCheckpointing     bool               `toml:"enable_checkpointing"`      // Enable checkpoint/resume support
 	CheckpointInterval      int                `toml:"checkpoint_interval"`       // Save checkpoint every N completed jobs (default: 10)
@@ -156,6 +158,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Generation.OverGenerationBuffer < 0 || c.Generation.OverGenerationBuffer > 1.0 {
 		return fmt.Errorf("generation.over_generation_buffer must be between 0.0 and 1.0 (got %.2f)", c.Generation.OverGenerationBuffer)
+	}
+	if c.Generation.MinSuccessRate < 0 || c.Generation.MinSuccessRate > 1.0 {
+		return fmt.Errorf("generation.min_success_rate must be between 0.0 and 1.0 (got %.2f)", c.Generation.MinSuccessRate)
+	}
+	if c.Generation.PromptRetryAttempts < 0 || c.Generation.PromptRetryAttempts > 5 {
+		return fmt.Errorf("generation.prompt_retry_attempts must be between 0 and 5 (got %d)", c.Generation.PromptRetryAttempts)
 	}
 	if c.Generation.CheckpointInterval < 1 {
 		// Set default if not specified

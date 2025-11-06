@@ -59,6 +59,19 @@ over_generation_buffer = 0.15
 # Increase for models with larger context windows
 max_exclusion_list_size = 50
 
+# === ROBUSTNESS & FAILURE HANDLING ===
+
+# Minimum success rate for prompt generation (0.0-1.0, default: 0.90)
+# Pipeline continues with partial results if at least this percentage of subtopics succeed
+# Below this threshold, the run aborts
+# Example: 0.90 = allow up to 10% of subtopics to fail
+# min_success_rate = 0.90
+
+# Number of retry attempts for failed subtopics (0-5, default: 2)
+# Failed subtopics are retried with exponential backoff (1s, 2s, 4s...)
+# Set to 0 to disable retries and fail fast
+# prompt_retry_attempts = 2
+
 # Disable validation limits (default: false, USE WITH CAUTION)
 # Removes upper bounds on concurrency, num_subtopics, num_prompts_per_subtopic
 # May cause memory exhaustion or API rate limits with very high values

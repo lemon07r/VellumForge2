@@ -65,6 +65,12 @@ func applyDefaults(cfg *Config) {
 	if cfg.Generation.MaxExclusionListSize == 0 {
 		cfg.Generation.MaxExclusionListSize = 50
 	}
+	if cfg.Generation.MinSuccessRate == 0 {
+		cfg.Generation.MinSuccessRate = 0.90 // 90% success rate by default
+	}
+	if cfg.Generation.PromptRetryAttempts == 0 {
+		cfg.Generation.PromptRetryAttempts = 2 // 2 retry attempts by default
+	}
 
 	// Apply defaults for each model
 	for name, model := range cfg.Models {
