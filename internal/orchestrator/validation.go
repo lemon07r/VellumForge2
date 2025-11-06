@@ -5,6 +5,9 @@ import (
 )
 
 // Common refusal patterns from LLM responses
+// IMPORTANT: These checks should ONLY be applied to chosen/main model responses.
+// Rejected responses with these patterns are valuable training signals that teach
+// the model what NOT to do. Do not filter rejected responses for refusals.
 var refusalPatterns = []string{
 	"i'm sorry, but i can't help with that",
 	"i cannot help with that",

@@ -40,6 +40,26 @@ func NewDatasetWriter(sessionMgr *SessionManager, logger *slog.Logger, resumeMod
 			return nil, fmt.Errorf("failed to create dataset file: %w", err)
 		}
 		logger.Info("Created dataset file", "path", datasetPath)
+		
+		// Write metadata header to ensure unique file hash for HuggingFace LFS
+		// This prevents collisions with HF's global LFS cache (which is shared by SHA256)
+		// The metadata is a valid JSON object that can be filtered by dataset loaders
+		metadata := map[string]interface{}{
+			"_vellumforge_metadata": map[string]interface{}{
+				"version":    "1.0",
+				"session":    sessionMgr.GetSessionName(),
+				"created_at": sessionMgr.GetTimestamp(),
+				"generator":  "VellumForge2",
+			},
+		}
+		metadataJSON, err := json.Marshal(metadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+		if _, err := file.Write(append(metadataJSON, '\n')); err != nil {
+			return nil, fmt.Errorf("failed to write metadata header: %w", err)
+		}
+		logger.Debug("Wrote metadata header to ensure unique file hash for HuggingFace LFS")
 	}
 
 	// Pre-allocate based on expected record count for optimal performance

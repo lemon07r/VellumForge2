@@ -148,17 +148,26 @@ func (u *Uploader) Upload(repoID, sessionDir string) error {
 
 		for oid, uploadInfo := range uploadMap {
 			localPath := filePaths[oid]
+			
+			// Log whether we got an upload URL
+			if uploadInfo.UploadURL == "" {
+				u.logger.Warn("Preupload returned no upload URL - file may be cached globally",
+					"oid", oid,
+					"file", filepath.Base(localPath),
+					"note", "This will likely cause commit to fail")
+			}
+			
 			if err := u.UploadLFSFileWithRetry(uploadInfo, localPath, MaxRetries); err != nil {
 				return fmt.Errorf("failed to upload LFS file %s: %w", localPath, err)
 			}
 		}
 	}
 
-	// Create commit
+	// Create commit with retry logic
 	sessionName := filepath.Base(sessionDir)
 	commitMsg := fmt.Sprintf("Upload dataset from VellumForge2 session %s", sessionName)
 
-	if err := u.createCommit(repoID, "main", operations, commitMsg); err != nil {
+	if err := u.createCommitWithRetry(repoID, "main", operations, commitMsg, MaxRetries); err != nil {
 		return fmt.Errorf("failed to create commit: %w", err)
 	}
 
@@ -166,6 +175,36 @@ func (u *Uploader) Upload(repoID, sessionDir string) error {
 		"repo_id", repoID,
 		"url", fmt.Sprintf("https://huggingface.co/datasets/%s", repoID))
 
+	return nil
+}
+
+func (u *Uploader) deleteRepo(repoID string) error {
+	url := fmt.Sprintf("https://huggingface.co/api/datasets/%s", repoID)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+u.token)
+
+	u.logger.Debug("Deleting repository", "repo_id", repoID, "url", url)
+
+	resp, err := u.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			u.logger.Warn("Failed to close response body", "error", err)
+		}
+	}()
+
+	// 200/204 = success, 404 = already deleted (OK)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete repo failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	u.logger.Info("Repository deleted", "repo_id", repoID)
 	return nil
 }
 
@@ -181,10 +220,18 @@ func (u *Uploader) createRepo(repoID string) error {
 	resp, err := u.httpClient.Do(req)
 	if err == nil && resp.StatusCode == http.StatusOK {
 		_ = resp.Body.Close()
-		u.logger.Info("Repository already exists", "repo_id", repoID)
-		return nil
-	}
-	if resp != nil {
+		u.logger.Warn("Repository already exists - deleting to ensure clean state", "repo_id", repoID)
+		
+		// Delete existing repo to avoid LFS cache issues
+		if err := u.deleteRepo(repoID); err != nil {
+			return fmt.Errorf("failed to delete existing repo: %w", err)
+		}
+		
+		// Wait for HF to propagate deletion and clear LFS cache
+		// This is necessary because HF's LFS storage is global and cached
+		u.logger.Info("Waiting for HF to propagate deletion", "seconds", 10)
+		time.Sleep(10 * time.Second)
+	} else if resp != nil {
 		_ = resp.Body.Close()
 	}
 
@@ -316,9 +363,11 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 	req.Header.Set("Content-Type", "application/x-ndjson")
 
 	u.logger.Debug("Creating commit", "url", url, "operations", len(operations))
+	u.logger.Debug("Starting commit HTTP request")
 
 	resp, err := u.commitClient.Do(req)
 	if err != nil {
+		u.logger.Warn("Commit HTTP request failed", "error", err)
 		return err
 	}
 	defer func() {
@@ -327,16 +376,58 @@ func (u *Uploader) createCommit(repoID, branch string, operations []CommitOperat
 		}
 	}()
 
+	u.logger.Debug("Received commit HTTP response", "status", resp.StatusCode)
+
 	// Read and log response
 	bodyBytes, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		u.logger.Error("Commit failed with non-success status",
+			"status", resp.StatusCode,
+			"response", string(bodyBytes))
 		return fmt.Errorf("commit failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	u.logger.Debug("Commit response", "status", resp.StatusCode, "body", string(bodyBytes))
 	u.logger.Info("Commit created successfully", "branch", branch, "operations", len(operations))
 	return nil
+}
+
+// createCommitWithRetry attempts to create a commit with retry logic
+func (u *Uploader) createCommitWithRetry(repoID, branch string, operations []CommitOperation, message string, maxRetries int) error {
+	var lastErr error
+	backoff := 2 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			u.logger.Warn("Retrying commit creation",
+				"repo_id", repoID,
+				"branch", branch,
+				"attempt", attempt,
+				"max_retries", maxRetries,
+				"backoff", backoff)
+			time.Sleep(backoff)
+			backoff *= 2 // Exponential backoff
+		}
+
+		err := u.createCommit(repoID, branch, operations, message)
+		if err == nil {
+			if attempt > 0 {
+				u.logger.Info("Commit creation succeeded after retry",
+					"repo_id", repoID,
+					"attempt", attempt)
+			}
+			return nil
+		}
+
+		lastErr = err
+		u.logger.Warn("Commit creation failed",
+			"repo_id", repoID,
+			"attempt", attempt,
+			"error", err)
+	}
+
+	return fmt.Errorf("commit failed after %d attempts: %w", maxRetries+1, lastErr)
 }
 
 // createGitAttributesOperation creates a .gitattributes file operation

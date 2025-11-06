@@ -137,15 +137,10 @@ func (o *Orchestrator) processJob(
 		result.Rejected = rejectedResp.Choices[0].Message.Content
 		rejectedDuration = time.Since(rejectedStart)
 
-		// Check for refusal in rejected response
-		if isRefusalResponse(result.Rejected) {
-			result.Error = fmt.Errorf("rejected response contains refusal: %s", getRefusalReason(result.Rejected))
-			logger.Warn("Rejected response refused",
-				"job_id", job.ID,
-				"reason", getRefusalReason(result.Rejected),
-				"prompt_preview", job.Prompt[:min(100, len(job.Prompt))])
-			return result
-		}
+		// Note: We do NOT filter rejected responses for refusal patterns.
+		// Rejected responses with safety patterns ("as an ai", etc.) are valuable
+		// training signals that teach the model what NOT to do. This is the core
+		// purpose of preference tuning - showing the model both good and bad examples.
 	} else {
 		// SFT mode without rejected model
 		result.Rejected = ""

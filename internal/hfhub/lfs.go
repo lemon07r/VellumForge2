@@ -94,7 +94,8 @@ func (u *Uploader) PreuploadLFS(repoID, branch string, files []LFSPointer) (map[
 func (u *Uploader) UploadLFSFile(uploadInfo *LFSUploadInfo, filePath string) error {
 	if uploadInfo.UploadURL == "" {
 		// File already exists on server, no upload needed
-		u.logger.Debug("LFS file already exists", "oid", uploadInfo.OID)
+		// Note: The Upload() function now deletes existing repos to avoid stale LFS cache
+		u.logger.Debug("LFS file already exists on server", "oid", uploadInfo.OID)
 		return nil
 	}
 
