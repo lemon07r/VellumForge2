@@ -164,16 +164,31 @@ func (dw *DatasetWriter) Flush() error {
 }
 
 // Close flushes all records and closes the dataset file
+// This method holds the lock for the entire operation to prevent any concurrent
+// updates during the close sequence (defensive programming for MO-DPO mode)
 func (dw *DatasetWriter) Close() error {
-	// Flush all buffered records to disk
-	if err := dw.Flush(); err != nil {
-		return fmt.Errorf("failed to flush records: %w", err)
+	dw.mu.Lock()
+	defer dw.mu.Unlock()
+
+	// Flush all buffered records to disk (inline to maintain lock)
+	dw.logger.Info("Flushing records to disk before close", "count", len(dw.records))
+	for i, record := range dw.records {
+		data, err := json.Marshal(record)
+		if err != nil {
+			return fmt.Errorf("failed to marshal record %d: %w", i, err)
+		}
+
+		if _, err := dw.file.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("failed to write record %d: %w", i, err)
+		}
 	}
 
+	// Sync to ensure all data is written to disk
 	if err := dw.file.Sync(); err != nil {
 		dw.logger.Warn("Failed to sync dataset file", "error", err)
 	}
 
+	// Close the file
 	if err := dw.file.Close(); err != nil {
 		return fmt.Errorf("failed to close dataset file: %w", err)
 	}
