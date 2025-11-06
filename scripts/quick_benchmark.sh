@@ -91,8 +91,10 @@ with open('$SESSION_DIR/session.log') as f:
                 rejected.append(d.get('rejected_ms', 0))
                 judge.append(d.get('judge_ms', 0))
                 total.append(d.get('total_ms', 0))
-            elif 'rate_limit_wait_ms' in d:
-                rate_waits.append(d.get('rate_limit_wait_ms', 0))
+            elif 'Retrying API request' in d.get('msg', '') and d.get('is_rate_limit'):
+                # backoff is in nanoseconds, convert to milliseconds
+                backoff_ns = d.get('backoff', 0)
+                rate_waits.append(backoff_ns / 1e6)
             elif 'Generation pipeline completed' in d.get('msg', ''):
                 duration = d.get('duration', 0) / 1e9
         except:

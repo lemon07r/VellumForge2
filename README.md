@@ -404,7 +404,7 @@ MIT License - see [LICENSE](LICENSE) file.
   author = {Lamim},
   year = {2025},
   url = {https://github.com/lemon07r/vellumforge2},
-  version = {1.5.0}
+  version = {1.5.2}
 }
 ```
 
@@ -421,5 +421,5 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
-Current Version: v1.5.1
+Current Version: v1.5.2
 Last Updated: 2025-11-06

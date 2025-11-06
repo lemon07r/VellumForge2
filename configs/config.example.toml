@@ -6,7 +6,7 @@
 # Overrides individual model rate_limit_per_minute settings
 # Use when provider has a global API quota (e.g., all NVIDIA models share one limit)
 [provider_rate_limits]
-nvidia = 40        # Requests per minute for all NVIDIA models combined
+nvidia = 38        # Requests per minute for all NVIDIA models combined
 # openai = 500       # Requests per minute for all OpenAI models combined
 # anthropic = 200
 # together = 100
@@ -15,7 +15,7 @@ nvidia = 40        # Requests per minute for all NVIDIA models combined
 # Controls simultaneous requests exceeding steady-state rate
 # Higher burst (20-25%) = better throughput with 64+ workers but may cause occasional 429 errors
 # Lower burst (10-12%) = fewer 429 errors but may throttle throughput
-# provider_burst_percent = 15
+provider_burst_percent = 5
 
 # === GENERATION SETTINGS ===
 [generation]
