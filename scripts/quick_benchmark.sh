@@ -52,7 +52,11 @@ echo "workers,duration_sec,throughput,avg_job_time,rate_wait_ms,blocking_pct" > 
     echo "──────────────────────────────────────────────────────────────────────────────────────────────────"
 } > "$RESULTS_DIR/summary.txt"
 
+run_count=0
+total_runs=${#WORKER_COUNTS[@]}
+
 for workers in "${WORKER_COUNTS[@]}"; do
+    ((++run_count))
     echo ""
     echo -e "${YELLOW}Testing $workers workers...${NC}"
     
@@ -71,6 +75,16 @@ for workers in "${WORKER_COUNTS[@]}"; do
     if [ ! -d "$SESSION_DIR" ]; then
         echo "Error: Session directory not found"
         continue
+    fi
+    
+    # Save dataset and checkpoint for inspection
+    if [ -f "$SESSION_DIR/dataset.jsonl" ]; then
+        cp "$SESSION_DIR/dataset.jsonl" "$RESULTS_DIR/dataset_${workers}w.jsonl"
+        echo "  Saved dataset: dataset_${workers}w.jsonl"
+    fi
+    
+    if [ -f "$SESSION_DIR/checkpoint.json" ]; then
+        cp "$SESSION_DIR/checkpoint.json" "$RESULTS_DIR/checkpoint_${workers}w.json"
     fi
     
     # Quick metric extraction
@@ -127,6 +141,13 @@ else:
     else
         echo "  Failed to extract metrics"
     fi
+    
+    # Cooldown between runs (skip after last run)
+    if [ $run_count -lt $total_runs ]; then
+        echo ""
+        echo -e "${BLUE}Cooling down for 60 seconds to allow API backend recovery...${NC}"
+        sleep 60
+    fi
 done
 
 # Restore config
@@ -145,3 +166,15 @@ BEST_THROUGHPUT=$(echo "$BEST_LINE" | cut -d',' -f3)
 echo -e "${GREEN}✓ OPTIMAL: $BEST_WORKERS workers ($BEST_THROUGHPUT jobs/min)${NC}"
 echo ""
 echo "Detailed results: $RESULTS_DIR"
+echo ""
+
+# List saved datasets
+echo -e "${BLUE}Saved Datasets:${NC}"
+for dataset in "$RESULTS_DIR"/dataset_*w.jsonl; do
+    if [ -f "$dataset" ]; then
+        filename=$(basename "$dataset")
+        size=$(du -h "$dataset" | cut -f1)
+        lines=$(wc -l < "$dataset")
+        echo "  • $filename ($size, $lines records)"
+    fi
+done
