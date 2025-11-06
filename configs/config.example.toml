@@ -46,7 +46,7 @@ num_prompts_per_subtopic = 2
 # Concurrent workers for preference pair generation
 # Recommended: 16-256 with provider rate limiting
 # Range: 1-1024 (increase with disable_validation_limits if needed)
-concurrency = 64
+concurrency = 48
 
 # Over-generation buffer (0.0-1.0, default: 0.15)
 # Requests extra items to compensate for duplicates and LLM undershoot
