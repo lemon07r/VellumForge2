@@ -421,5 +421,5 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
-Current Version: v1.5.0
-Last Updated: 2025-11-05
+Current Version: v1.5.1
+Last Updated: 2025-11-06
