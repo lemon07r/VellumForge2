@@ -88,7 +88,9 @@ func (c *Client) GetEffectiveRateLimit(modelCfg config.ModelConfig) (int, int, b
 			if burstPercent == 0 {
 				burstPercent = 15 // Default
 			}
-			burstCapacity := max((providerRPM*burstPercent)/100, 3)
+			// Calculate burst capacity: base rate + (base rate * burst percentage)
+			// Example: 40 RPM with 15% burst = 40 * (100 + 15) / 100 = 46
+			burstCapacity := max((providerRPM*(100+burstPercent))/100, 3)
 			return providerRPM, burstCapacity, true
 		}
 	}
