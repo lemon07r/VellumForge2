@@ -371,8 +371,8 @@ func (o *Orchestrator) evaluateJudgeAsync(recordIndex int, prompt, chosen, rejec
 	o.judgeSemaphore <- struct{}{}
 	defer func() { <-o.judgeSemaphore }()
 
-	// Create context with timeout for judge evaluation
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	// Create context with timeout for judge evaluation (use main context for cancellation)
+	ctx, cancel := context.WithTimeout(o.ctx, 180*time.Second)
 	defer cancel()
 
 	// Evaluate (this blocks for 70-103s, but doesn't block workers!)

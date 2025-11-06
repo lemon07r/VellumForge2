@@ -9,6 +9,16 @@ import (
 
 // Load reads and parses the configuration file and environment variables
 func Load(configPath string) (*Config, *Secrets, error) {
+	// Check file size before reading (prevent OOM attacks)
+	const maxConfigSize = 10 * 1024 * 1024 // 10MB
+	fileInfo, err := os.Stat(configPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to stat config file: %w", err)
+	}
+	if fileInfo.Size() > maxConfigSize {
+		return nil, nil, fmt.Errorf("config file too large: %d bytes (max %d bytes)", fileInfo.Size(), maxConfigSize)
+	}
+
 	// Read config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -64,12 +74,7 @@ func applyDefaults(cfg *Config) {
 		if model.TopP == 0 {
 			model.TopP = 1.0
 		}
-		if model.TopK == 0 {
-			model.TopK = -1 // -1 means disabled
-		}
-		if model.MinP == 0 {
-			model.MinP = 0.0
-		}
+
 		if model.MaxOutputTokens == 0 {
 			model.MaxOutputTokens = 4096
 		}

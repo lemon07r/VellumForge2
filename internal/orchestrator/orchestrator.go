@@ -43,6 +43,7 @@ type Orchestrator struct {
 	stats         *models.SessionStats
 	checkpointMgr *checkpoint.Manager
 	resumeMode    bool
+	ctx           context.Context // Main context for cancellation propagation
 	// Non-blocking judge support
 	judgeUpdates   chan judgeUpdate
 	pendingJudges  sync.WaitGroup
@@ -100,6 +101,9 @@ func New(
 
 // Run executes the complete generation pipeline
 func (o *Orchestrator) Run(ctx context.Context) error {
+	// Store context for judge goroutines to respect cancellation
+	o.ctx = ctx
+	
 	var checkpointCloseErr error
 
 	defer func() {
@@ -461,6 +465,9 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 		return nil, err
 	}
 
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("API returned empty response")
+	}
 	content := resp.Choices[0].Message.Content
 	o.logger.Debug("Received subtopics response", "length", len(content))
 
@@ -528,8 +535,8 @@ func (o *Orchestrator) generatePrompts(ctx context.Context, subtopics []string) 
 
 	// Start workers
 	var wg sync.WaitGroup
+	wg.Add(o.cfg.Generation.Concurrency) // Add all workers before starting goroutines
 	for i := 0; i < o.cfg.Generation.Concurrency; i++ {
-		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 			for task := range tasksChan {
@@ -631,6 +638,9 @@ func (o *Orchestrator) generatePromptsForSubtopic(ctx context.Context, subtopic 
 		return nil, err
 	}
 
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("API returned empty response")
+	}
 	// Parse JSON response
 	content := resp.Choices[0].Message.Content
 
@@ -692,8 +702,8 @@ func (o *Orchestrator) generatePreferencePairs(ctx context.Context, jobs []model
 
 	// Start workers
 	var wg sync.WaitGroup
+	wg.Add(o.cfg.Generation.Concurrency) // Add all workers before starting goroutines
 	for i := 0; i < o.cfg.Generation.Concurrency; i++ {
-		wg.Add(1)
 		go o.worker(ctx, i, jobsChan, resultsChan, &wg)
 	}
 

@@ -271,8 +271,10 @@ func TestValidateUpperBounds(t *testing.T) {
 					},
 				},
 				PromptTemplates: PromptTemplates{
-					SubtopicGeneration: "test",
-					PromptGeneration:   "test",
+					SubtopicGeneration:  "test",
+					PromptGeneration:    "test",
+					ChosenGeneration:    "test",
+					RejectedGeneration:  "test",
 				},
 			},
 			wantErr: false,
@@ -310,8 +312,10 @@ func TestValidateUpperBounds(t *testing.T) {
 					},
 				},
 				PromptTemplates: PromptTemplates{
-					SubtopicGeneration: "test",
-					PromptGeneration:   "test",
+					SubtopicGeneration:  "test",
+					PromptGeneration:    "test",
+					ChosenGeneration:    "test",
+					RejectedGeneration:  "test",
 				},
 			},
 			wantErr: false,
@@ -373,8 +377,10 @@ func TestDisableValidationLimits(t *testing.T) {
 					},
 				},
 				PromptTemplates: PromptTemplates{
-					SubtopicGeneration: "test",
-					PromptGeneration:   "test",
+					SubtopicGeneration:  "test",
+					PromptGeneration:    "test",
+					ChosenGeneration:    "test",
+					RejectedGeneration:  "test",
 				},
 			},
 			wantErr: false, // Should pass with disabled validation
@@ -410,8 +416,10 @@ func TestDisableValidationLimits(t *testing.T) {
 					},
 				},
 				PromptTemplates: PromptTemplates{
-					SubtopicGeneration: "test",
-					PromptGeneration:   "test",
+					SubtopicGeneration:  "test",
+					PromptGeneration:    "test",
+					ChosenGeneration:    "test",
+					RejectedGeneration:  "test",
 				},
 			},
 			wantErr: true, // Should fail - validation enabled

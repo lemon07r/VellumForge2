@@ -121,15 +121,6 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Debug: Check if API keys were loaded
-	if verbose {
-		for provider, key := range secrets.APIKeys {
-			if key != "" {
-				fmt.Fprintf(os.Stderr, "Loaded API key for: %s (length: %d)\n", provider, len(key))
-			}
-		}
-	}
-
 	// Determine log level
 	logLevel := slog.LevelInfo
 	if verbose {
@@ -152,8 +143,12 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	}
 	defer func() {
 		if logFile != nil {
-			_ = logFile.Sync()
-			_ = logFile.Close()
+			if err := logFile.Sync(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to sync log file: %v\n", err)
+			}
+			if err := logFile.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close log file: %v\n", err)
+			}
 		}
 	}()
 
@@ -556,8 +551,12 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 	}
 	defer func() {
 		if logFile != nil {
-			_ = logFile.Sync()
-			_ = logFile.Close()
+			if err := logFile.Sync(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to sync log file: %v\n", err)
+			}
+			if err := logFile.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close log file: %v\n", err)
+			}
 		}
 	}()
 

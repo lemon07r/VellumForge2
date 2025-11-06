@@ -51,8 +51,6 @@ type ModelConfig struct {
 	Temperature          float64 `toml:"temperature"`
 	StructureTemperature float64 `toml:"structure_temperature"` // Temperature for JSON generation (optional, defaults to temperature)
 	TopP                 float64 `toml:"top_p"`
-	TopK                 int     `toml:"top_k"`
-	MinP                 float64 `toml:"min_p"`
 	MaxOutputTokens      int     `toml:"max_output_tokens"`
 	ContextSize          int     `toml:"context_size"`
 	RateLimitPerMinute   int     `toml:"rate_limit_per_minute"`
@@ -237,6 +235,12 @@ func (c *Config) Validate() error {
 	if c.PromptTemplates.PromptGeneration == "" {
 		return fmt.Errorf("prompt_templates.prompt_generation is required")
 	}
+	if c.PromptTemplates.ChosenGeneration == "" {
+		return fmt.Errorf("prompt_templates.chosen_generation is required")
+	}
+	if c.PromptTemplates.RejectedGeneration == "" {
+		return fmt.Errorf("prompt_templates.rejected_generation is required")
+	}
 
 	return nil
 }
@@ -250,6 +254,9 @@ func validateModelConfig(name string, mc ModelConfig) error {
 	}
 	if mc.Temperature < 0 || mc.Temperature > 2 {
 		return fmt.Errorf("models.%s.temperature must be between 0 and 2", name)
+	}
+	if mc.StructureTemperature > 0 && (mc.StructureTemperature < 0 || mc.StructureTemperature > 2) {
+		return fmt.Errorf("models.%s.structure_temperature must be between 0 and 2", name)
 	}
 	if mc.TopP < 0 || mc.TopP > 1 {
 		return fmt.Errorf("models.%s.top_p must be between 0 and 1", name)

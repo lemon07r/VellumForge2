@@ -129,6 +129,9 @@ func (j *Judge) evaluateSingle(ctx context.Context, prompt, story string, includ
 		return nil, fmt.Errorf("API call failed: %w", err)
 	}
 
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("API returned empty response")
+	}
 	// Parse response with multiple strategies
 	// This tries different JSON repair techniques on the SAME response
 	// No additional API calls are made - this is purely local processing
