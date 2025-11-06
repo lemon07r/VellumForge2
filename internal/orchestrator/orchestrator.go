@@ -248,6 +248,12 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		o.logger.Info("All background judge evaluations complete")
 	}
 
+	// Check if context was canceled during generation
+	if ctx.Err() == context.Canceled {
+		o.logger.Warn("Context canceled during generation - returning early")
+		return context.Canceled
+	}
+
 	// Finalize stats
 	o.stats.EndTime = time.Now()
 	o.stats.TotalDuration = o.stats.EndTime.Sub(o.stats.StartTime)
