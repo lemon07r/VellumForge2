@@ -107,11 +107,22 @@ func (j *Judge) evaluateSingle(ctx context.Context, prompt, story string, includ
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
 	defer cancel()
 
+	// Build messages with optional system prompt
+	messages := []api.Message{}
+	if j.cfg.PromptTemplates.JudgeSystemPrompt != "" {
+		messages = append(messages, api.Message{
+			Role:    "system",
+			Content: j.cfg.PromptTemplates.JudgeSystemPrompt,
+		})
+	}
+	messages = append(messages, api.Message{
+		Role:    "user",
+		Content: judgePrompt,
+	})
+
 	// Call judge model ONCE
 	// API-level retries are handled by the API client for network errors, timeouts, etc.
-	resp, err := j.apiClient.ChatCompletion(timeoutCtx, judgeModel, apiKey, []api.Message{
-		{Role: "user", Content: judgePrompt},
-	})
+	resp, err := j.apiClient.ChatCompletion(timeoutCtx, judgeModel, apiKey, messages)
 	if err != nil {
 		// API call failed - network error, timeout, rate limit, etc.
 		// The API client has already retried these errors appropriately

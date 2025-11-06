@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lamim/vellumforge2/internal/config"
@@ -26,6 +27,14 @@ const (
 	// DefaultMaxBackoffDuration is the default maximum backoff duration
 	DefaultMaxBackoffDuration = 2 * time.Minute
 )
+
+// isLocalEndpoint checks if an endpoint is a local address
+func isLocalEndpoint(endpoint string) bool {
+	return strings.Contains(endpoint, "://127.0.0.1") ||
+		strings.Contains(endpoint, "://localhost") ||
+		strings.Contains(endpoint, "://[::1]") ||
+		strings.Contains(endpoint, "://0.0.0.0")
+}
 
 // Client handles HTTP requests to OpenAI-compatible API endpoints
 type Client struct {
@@ -245,7 +254,10 @@ func (c *Client) doRequest(
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		c.logger.Debug("API request", "endpoint", endpoint, "has_key", true, "key_length", len(apiKey))
 	} else {
-		c.logger.Warn("API request without key", "endpoint", endpoint)
+		// Only warn about missing API key for non-local endpoints
+		if !isLocalEndpoint(endpoint) {
+			c.logger.Warn("API request without key", "endpoint", endpoint)
+		}
 	}
 
 	// Send request

@@ -443,9 +443,20 @@ func (o *Orchestrator) requestSubtopics(ctx context.Context, count int, exclusio
 	mainModel := o.cfg.Models["main"]
 	apiKey := o.secrets.GetAPIKey(mainModel.BaseURL)
 
-	resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, []api.Message{
-		{Role: "user", Content: prompt},
+	// Build messages with optional system prompt
+	messages := []api.Message{}
+	if o.cfg.PromptTemplates.SubtopicSystemPrompt != "" {
+		messages = append(messages, api.Message{
+			Role:    "system",
+			Content: o.cfg.PromptTemplates.SubtopicSystemPrompt,
+		})
+	}
+	messages = append(messages, api.Message{
+		Role:    "user",
+		Content: prompt,
 	})
+
+	resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, messages)
 	if err != nil {
 		return nil, err
 	}
@@ -602,9 +613,20 @@ func (o *Orchestrator) generatePromptsForSubtopic(ctx context.Context, subtopic 
 	mainModel := o.cfg.Models["main"]
 	apiKey := o.secrets.GetAPIKey(mainModel.BaseURL)
 
-	resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, []api.Message{
-		{Role: "user", Content: prompt},
+	// Build messages with optional system prompt
+	messages := []api.Message{}
+	if o.cfg.PromptTemplates.PromptSystemPrompt != "" {
+		messages = append(messages, api.Message{
+			Role:    "system",
+			Content: o.cfg.PromptTemplates.PromptSystemPrompt,
+		})
+	}
+	messages = append(messages, api.Message{
+		Role:    "user",
+		Content: prompt,
 	})
+
+	resp, err := o.apiClient.ChatCompletionStructured(ctx, mainModel, apiKey, messages)
 	if err != nil {
 		return nil, err
 	}

@@ -68,15 +68,36 @@ func (o *Orchestrator) processJob(
 		return result
 	}
 
-	chosenResp, err := o.apiClient.ChatCompletion(ctx, mainModel, mainAPIKey, []api.Message{
-		{Role: "user", Content: chosenPrompt},
+	// Build messages with optional system prompt
+	chosenMessages := []api.Message{}
+	if o.cfg.PromptTemplates.ChosenSystemPrompt != "" {
+		chosenMessages = append(chosenMessages, api.Message{
+			Role:    "system",
+			Content: o.cfg.PromptTemplates.ChosenSystemPrompt,
+		})
+	}
+	chosenMessages = append(chosenMessages, api.Message{
+		Role:    "user",
+		Content: chosenPrompt,
 	})
+
+	chosenResp, err := o.apiClient.ChatCompletion(ctx, mainModel, mainAPIKey, chosenMessages)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to generate chosen response: %w", err)
 		return result
 	}
 	result.Chosen = chosenResp.Choices[0].Message.Content
 	chosenDuration := time.Since(chosenStart)
+
+	// Check for refusal in chosen response
+	if isRefusalResponse(result.Chosen) {
+		result.Error = fmt.Errorf("chosen response contains refusal: %s", getRefusalReason(result.Chosen))
+		logger.Warn("Chosen response refused",
+			"job_id", job.ID,
+			"reason", getRefusalReason(result.Chosen),
+			"prompt_preview", job.Prompt[:min(100, len(job.Prompt))])
+		return result
+	}
 
 	// Generate rejected response (skip for SFT mode if model not configured)
 	var rejectedDuration time.Duration
@@ -95,15 +116,36 @@ func (o *Orchestrator) processJob(
 			return result
 		}
 
-		rejectedResp, err := o.apiClient.ChatCompletion(ctx, rejectedModel, rejectedAPIKey, []api.Message{
-			{Role: "user", Content: rejectedPrompt},
+		// Build messages with optional system prompt
+		rejectedMessages := []api.Message{}
+		if o.cfg.PromptTemplates.RejectedSystemPrompt != "" {
+			rejectedMessages = append(rejectedMessages, api.Message{
+				Role:    "system",
+				Content: o.cfg.PromptTemplates.RejectedSystemPrompt,
+			})
+		}
+		rejectedMessages = append(rejectedMessages, api.Message{
+			Role:    "user",
+			Content: rejectedPrompt,
 		})
+
+		rejectedResp, err := o.apiClient.ChatCompletion(ctx, rejectedModel, rejectedAPIKey, rejectedMessages)
 		if err != nil {
 			result.Error = fmt.Errorf("failed to generate rejected response: %w", err)
 			return result
 		}
 		result.Rejected = rejectedResp.Choices[0].Message.Content
 		rejectedDuration = time.Since(rejectedStart)
+
+		// Check for refusal in rejected response
+		if isRefusalResponse(result.Rejected) {
+			result.Error = fmt.Errorf("rejected response contains refusal: %s", getRefusalReason(result.Rejected))
+			logger.Warn("Rejected response refused",
+				"job_id", job.ID,
+				"reason", getRefusalReason(result.Rejected),
+				"prompt_preview", job.Prompt[:min(100, len(job.Prompt))])
+			return result
+		}
 	} else {
 		// SFT mode without rejected model
 		result.Rejected = ""

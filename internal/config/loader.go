@@ -115,4 +115,20 @@ func applyDefaults(cfg *Config) {
 	if cfg.PromptTemplates.JudgeRubric == "" {
 		cfg.PromptTemplates.JudgeRubric = GetDefaultJudgeTemplate()
 	}
+
+	// Apply default system prompts if not provided (optional)
+	// Note: System prompts are optional and can be left empty
+	// Uncomment these lines to enable default system prompts that reduce refusals:
+	// if cfg.PromptTemplates.ChosenSystemPrompt == "" {
+	// 	cfg.PromptTemplates.ChosenSystemPrompt = GetDefaultChosenSystemPrompt()
+	// }
+	// if cfg.PromptTemplates.SubtopicSystemPrompt == "" {
+	// 	cfg.PromptTemplates.SubtopicSystemPrompt = GetDefaultSubtopicSystemPrompt()
+	// }
+	// if cfg.PromptTemplates.PromptSystemPrompt == "" {
+	// 	cfg.PromptTemplates.PromptSystemPrompt = GetDefaultPromptSystemPrompt()
+	// }
+	// if cfg.PromptTemplates.JudgeSystemPrompt == "" {
+	// 	cfg.PromptTemplates.JudgeSystemPrompt = GetDefaultJudgeSystemPrompt()
+	// }
 }

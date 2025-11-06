@@ -12,8 +12,10 @@ import (
 
 // LFSPointer represents a pointer to an LFS file
 type LFSPointer struct {
-	OID  string `json:"oid"`  // SHA256 hash
-	Size int64  `json:"size"` // File size in bytes
+	OID    string `json:"oid"`    // SHA256 hash
+	Size   int64  `json:"size"`   // File size in bytes
+	Path   string `json:"path"`   // Path in repository
+	Sample string `json:"sample"` // Sample content for preview (base64)
 }
 
 // LFSUploadInfo contains upload information for an LFS file

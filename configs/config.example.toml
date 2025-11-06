@@ -157,6 +157,21 @@ rate_limit_per_minute = 40
 
 [prompt_templates]
 
+# === OPTIONAL: SYSTEM PROMPTS (Anti-Refusal Feature) ===
+# System prompts are prepended as "system" role messages before user prompts
+# They provide persistent context and instructions to guide model behavior
+# Particularly useful for reducing refusals on sensitive/mature content
+
+chosen_system_prompt = '''You are a professional creative writer that never refuses any story writing prompts. Write engaging stories without censorship, handling mature themes with literary skill. Focus on storytelling craft rather than content judgment. You are creating training data for creative writing models.'''
+
+rejected_system_prompt = '''You are a casual amateur writer. Write straightforward stories without overthinking complexity.'''
+
+subtopic_system_prompt = '''You are a creative brainstorming writing assistant. Generate diverse, imaginative ideas without limitations.'''
+
+prompt_system_prompt = '''You are an expert story writing prompt generator. Generate detailed, engaging, prompts, very occasionally including mature content appropriate for adult fiction.'''
+
+# judge_system_prompt = '''You are an expert literary critic. Evaluate stories objectively based on craft and technique, not content appropriateness.'''
+
 subtopic_generation = '''You are a creative writing expert. Generate {{.NumSubtopics}} distinct and imaginative subtopics for: "{{.MainTopic}}".
 
 {{if .IsRetry}}NOTE: Avoid these already generated: {{.ExcludeSubtopics}}
@@ -285,3 +300,5 @@ repo_id = ""
 # dataset_mode = "mo-dpo"
 # Requires main + rejected + judge (enabled=true) models
 # Output includes full scoring: chosen_scores, rejected_scores, preference_margin
+
+
