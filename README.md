@@ -15,7 +15,7 @@ High-performance synthetic dataset generator for LLM training. Generates DPO, SF
 - **MO-DPO** - Full multi-objective DPO with detailed judge scoring for reward modeling
 
 ### High Performance
-- Concurrent worker pool supporting 64-256 parallel requests
+- Concurrent worker pool supporting up to 1024 parallel requests or more
 - Provider-level and per-model rate limiting with configurable burst capacity
 - Checkpoint/resume for interrupted sessions
 - Asynchronous judge evaluation (non-blocking)
@@ -310,9 +310,11 @@ output/
 
 Generated with VellumForge2 using Kimi K2 0905 + Phi-4 Instruct:
 
-- [VellumK2-Fantasy-DPO-Tiny-01](https://huggingface.co/datasets/lemon07r/VellumK2-Fantasy-DPO-Tiny-01) - 128 rows
-- [VellumK2-Fantasy-DPO-Small-01](https://huggingface.co/datasets/lemon07r/VellumK2-Fantasy-DPO-Small-01) - 1K rows
-- [VellumK2-Fantasy-DPO-01](https://huggingface.co/datasets/lemon07r/VellumK2-Fantasy-DPO-01) - 10K rows
+- **VellumK2-Fantasy-DPO-Tiny-01**: 126 rows - Testing and validation
+- **VellumK2-Fantasy-DPO-Small-01**: 1,038 rows - Light training and experiments
+- **VellumK2-Fantasy-DPO-Medium-01**: 3,069 rows - Combination training component
+- **VellumK2-Fantasy-DPO-Large-01**: 10,222 rows - Large-scale training 
+- **VellumK2-Unfettered-DPO-01**: 2,576 rows - Decensoring dataset to reduce refusal on sensitive content
 
 [View all example datasets](https://huggingface.co/collections/lemon07r/vellumforge2-datasets)
 
