@@ -63,6 +63,7 @@ type ModelConfig struct {
 	HTTPTimeoutSeconds   int     `toml:"http_timeout_seconds"`            // Optional: HTTP request timeout (default 120, 0 = no timeout)
 	JudgeTimeoutSeconds  int     `toml:"judge_timeout_seconds,omitempty"` // Timeout for judge API calls (default: 100s)
 	UseJSONMode          bool    `toml:"use_json_mode"`                   // Enable structured JSON output mode (optional)
+	UseStreaming         bool    `toml:"use_streaming"`                   // Enable streaming mode (bypasses gateway timeouts, default: false)
 	Enabled              bool    `toml:"enabled"`                         // Only used for judge model
 }
 

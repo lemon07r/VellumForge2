@@ -81,7 +81,15 @@ func (o *Orchestrator) processJob(
 		Content: chosenPrompt,
 	})
 
-	chosenResp, err := o.apiClient.ChatCompletion(ctx, mainModel, mainAPIKey, chosenMessages)
+	var chosenResp *api.ChatCompletionResponse
+	
+	// Use streaming if enabled (bypasses gateway timeouts for long responses)
+	if mainModel.UseStreaming {
+		chosenResp, err = o.apiClient.ChatCompletionStreaming(ctx, mainModel, mainAPIKey, chosenMessages)
+	} else {
+		chosenResp, err = o.apiClient.ChatCompletion(ctx, mainModel, mainAPIKey, chosenMessages)
+	}
+	
 	if err != nil {
 		result.Error = fmt.Errorf("failed to generate chosen response: %w", err)
 		return result
@@ -129,7 +137,15 @@ func (o *Orchestrator) processJob(
 			Content: rejectedPrompt,
 		})
 
-		rejectedResp, err := o.apiClient.ChatCompletion(ctx, rejectedModel, rejectedAPIKey, rejectedMessages)
+		var rejectedResp *api.ChatCompletionResponse
+		
+		// Use streaming if enabled (bypasses gateway timeouts for long responses)
+		if rejectedModel.UseStreaming {
+			rejectedResp, err = o.apiClient.ChatCompletionStreaming(ctx, rejectedModel, rejectedAPIKey, rejectedMessages)
+		} else {
+			rejectedResp, err = o.apiClient.ChatCompletion(ctx, rejectedModel, rejectedAPIKey, rejectedMessages)
+		}
+		
 		if err != nil {
 			result.Error = fmt.Errorf("failed to generate rejected response: %w", err)
 			return result

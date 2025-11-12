@@ -48,6 +48,21 @@ func (c *Client) ChatCompletionStreaming(
 ) (*ChatCompletionResponse, error) {
 	requestStart := time.Now()
 
+	// Apply per-model HTTP timeout
+	// HTTPTimeoutSeconds should always be set (config loader defaults to 120s)
+	// For long-form generation, increase this value in config
+	var cancel context.CancelFunc
+	timeout := time.Duration(modelCfg.HTTPTimeoutSeconds) * time.Second
+	if timeout == 0 {
+		// Fallback to default if somehow not set
+		timeout = DefaultHTTPTimeout
+		c.logger.Warn("Model has no timeout configured, using default",
+			"model", modelCfg.ModelName,
+			"timeout", timeout)
+	}
+	ctx, cancel = context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	// Generate a unique model ID for rate limiting
 	modelID := fmt.Sprintf("%s:%s", modelCfg.BaseURL, modelCfg.ModelName)
 
