@@ -252,6 +252,11 @@ Resume interrupted session:
 
 # Resume generation
 ./bin/vellumforge2 checkpoint resume session_2025-11-05T12-34-56
+
+# Resume with specific config and env file
+./bin/vellumforge2 checkpoint resume session_2025-11-05T12-34-56 \
+  --config config.sft.toml \
+  --env-file .env
 ```
 
 Graceful shutdown with Ctrl+C automatically saves checkpoint.
@@ -283,6 +288,9 @@ Graceful shutdown with Ctrl+C automatically saves checkpoint.
 
 # Resume from checkpoint
 ./bin/vellumforge2 checkpoint resume <session-dir>
+
+# Resume with specific config (important if checkpoint used different config file)
+./bin/vellumforge2 checkpoint resume <session-dir> --config config.sft.toml --env-file .env
 ```
 
 ### Other
@@ -365,6 +373,30 @@ Start local server or use same API endpoint:
 [models.rejected]
 base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "meta/llama-3.1-8b-instruct"  # Smaller model
+```
+
+### Request Timeout Errors for Long-Form Generation
+
+For long responses (>4000 words or >16k tokens), increase HTTP timeout:
+
+```toml
+[models.main]
+http_timeout_seconds = 900  # 15 minutes (default: 120)
+# For very long-form (32k+ tokens):
+# http_timeout_seconds = 1800  # 30 minutes
+```
+
+Typical generation times:
+- 4k tokens: ~1-2 minutes
+- 16k tokens: ~3-5 minutes
+- 32k tokens: ~5-10+ minutes
+
+Also increase retry settings for stability:
+
+```toml
+[models.main]
+max_retries = 8              # More retries for long requests (default: 3)
+max_backoff_seconds = 300    # Longer backoff cap (default: 120)
 ```
 
 See [GETTING_STARTED.md](GETTING_STARTED.md) for more troubleshooting.

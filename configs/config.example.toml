@@ -122,6 +122,11 @@ rate_limit_per_minute = 40   # Per-model limit (overridden by provider_rate_limi
 use_json_mode = false  # CAUTION: kimi-k2-0905 supports JSON mode but wraps arrays in objects {"key":[...]}
                        # Current code expects direct arrays, so keep disabled. Prompt examples work better!
 
+# HTTP request timeout in seconds (default: 120)
+# Increase for long-form generation: 900 (15min) for 16k-32k tokens, 1800 (30min) for 32k+ tokens
+# Typical generation times: 4k tokens ~1-2min, 16k tokens ~3-5min, 32k tokens ~5-10+ min
+# http_timeout_seconds = 120
+
 # Maximum backoff duration for rate limit retries (default: 120 seconds)
 # Backoff uses 3^n progression: 6s, 18s, 54s, capped at this value
 # max_backoff_seconds = 120
