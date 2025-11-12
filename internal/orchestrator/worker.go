@@ -116,11 +116,11 @@ func (o *Orchestrator) processJob(
 		return result
 	}
 
-	// Generate rejected response (skip for SFT mode if model not configured)
+	// Generate rejected response (skip for SFT mode)
 	var rejectedDuration time.Duration
 	rejectedModel, hasRejectedModel := o.cfg.Models["rejected"]
 
-	if hasRejectedModel {
+	if hasRejectedModel && o.cfg.Generation.DatasetMode != models.DatasetModeSFT {
 		rejectedStart := time.Now()
 		rejectedAPIKey := o.secrets.GetAPIKey(rejectedModel.BaseURL)
 
