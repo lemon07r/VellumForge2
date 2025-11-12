@@ -95,6 +95,15 @@ func (o *Orchestrator) processJob(
 		return result
 	}
 	result.Chosen = chosenResp.Choices[0].Message.Content
+	
+	// Capture reasoning content if available (for dual dataset mode)
+	if chosenResp.Choices[0].Message.ReasoningContent != "" {
+		result.ChosenReasoning = chosenResp.Choices[0].Message.ReasoningContent
+		logger.Debug("Captured chosen reasoning content",
+			"job_id", job.ID,
+			"reasoning_length", len(result.ChosenReasoning))
+	}
+	
 	chosenDuration := time.Since(chosenStart)
 
 	// Check for refusal in chosen response
@@ -151,6 +160,15 @@ func (o *Orchestrator) processJob(
 			return result
 		}
 		result.Rejected = rejectedResp.Choices[0].Message.Content
+		
+		// Capture reasoning content if available and enabled (for dual dataset mode)
+		if o.cfg.Generation.ReasoningCaptureRejected && rejectedResp.Choices[0].Message.ReasoningContent != "" {
+			result.RejectedReasoning = rejectedResp.Choices[0].Message.ReasoningContent
+			logger.Debug("Captured rejected reasoning content",
+				"job_id", job.ID,
+				"reasoning_length", len(result.RejectedReasoning))
+		}
+		
 		rejectedDuration = time.Since(rejectedStart)
 
 		// Note: We do NOT filter rejected responses for refusal patterns.
@@ -282,7 +300,7 @@ func (o *Orchestrator) writeSFTRecord(result models.GenerationResult) error {
 		record.SubTopic = result.Job.SubTopic
 	}
 
-	return o.dataWriter.WriteSFTRecord(record)
+	return o.dataWriter.WriteSFTRecord(record, result.ChosenReasoning)
 }
 
 // writeDPORecord writes a standard DPO preference pair
@@ -292,7 +310,7 @@ func (o *Orchestrator) writeDPORecord(result models.GenerationResult) error {
 		Chosen:   result.Chosen,
 		Rejected: result.Rejected,
 	}
-	return o.dataWriter.WriteDPORecord(record)
+	return o.dataWriter.WriteDPORecord(record, result.ChosenReasoning, result.RejectedReasoning)
 }
 
 // writeKTORecord writes two KTO records (one chosen, one rejected)
@@ -303,7 +321,7 @@ func (o *Orchestrator) writeKTORecord(result models.GenerationResult) error {
 		Completion: result.Chosen,
 		Label:      true,
 	}
-	if err := o.dataWriter.WriteKTORecord(chosenRecord); err != nil {
+	if err := o.dataWriter.WriteKTORecord(chosenRecord, result.ChosenReasoning); err != nil {
 		return fmt.Errorf("failed to write KTO chosen record: %w", err)
 	}
 
@@ -313,7 +331,7 @@ func (o *Orchestrator) writeKTORecord(result models.GenerationResult) error {
 		Completion: result.Rejected,
 		Label:      false,
 	}
-	if err := o.dataWriter.WriteKTORecord(rejectedRecord); err != nil {
+	if err := o.dataWriter.WriteKTORecord(rejectedRecord, result.RejectedReasoning); err != nil {
 		return fmt.Errorf("failed to write KTO rejected record: %w", err)
 	}
 

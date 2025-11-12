@@ -177,6 +177,60 @@ func (dw *DualDatasetWriter) WriteKTORecord(record models.KTORecord, reasoning s
 	return nil
 }
 
+// WriteRecord writes a buffered record (for MO-DPO mode with async judge)
+// Returns the record index for later updates
+// Only written to regular dataset (reasoning dataset doesn't support MO-DPO buffering)
+func (dw *DualDatasetWriter) WriteRecord(record models.DatasetRecord) (int, error) {
+	dw.mu.Lock()
+	defer dw.mu.Unlock()
+
+	index := len(dw.records)
+	dw.records = append(dw.records, record)
+	return index, nil
+}
+
+// UpdateRecord updates a record with judge results
+// Only applies to regular dataset (reasoning dataset written immediately)
+func (dw *DualDatasetWriter) UpdateRecord(recordIndex int, judgeResult *models.JudgeResult) error {
+	dw.mu.Lock()
+	defer dw.mu.Unlock()
+
+	if recordIndex < 0 || recordIndex >= len(dw.records) {
+		return fmt.Errorf("invalid record index: %d (total: %d)", recordIndex, len(dw.records))
+	}
+
+	// Update judge fields in memory (same as DatasetWriter)
+	dw.records[recordIndex].ChosenScores = judgeResult.ChosenScores
+	dw.records[recordIndex].RejectedScores = judgeResult.RejectedScores
+	dw.records[recordIndex].ChosenScoreTotal = judgeResult.ChosenScoreTotal
+	dw.records[recordIndex].RejectedScoreTotal = judgeResult.RejectedScoreTotal
+	dw.records[recordIndex].PreferenceMargin = judgeResult.PreferenceMargin
+
+	return nil
+}
+
+// Flush writes all buffered records to the regular dataset file
+// Reasoning dataset is written immediately, so no flush needed
+func (dw *DualDatasetWriter) Flush() error {
+	dw.mu.Lock()
+	defer dw.mu.Unlock()
+
+	for _, record := range dw.records {
+		data, err := json.Marshal(record)
+		if err != nil {
+			return fmt.Errorf("failed to marshal record: %w", err)
+		}
+
+		if _, err := dw.regularFile.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("failed to write record: %w", err)
+		}
+	}
+
+	dw.logger.Info("Flushed buffered records to regular dataset", "count", len(dw.records))
+	dw.records = dw.records[:0] // Clear buffer
+	return nil
+}
+
 // Close closes both dataset files
 func (dw *DualDatasetWriter) Close() error {
 	var errs []error

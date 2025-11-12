@@ -86,6 +86,14 @@ max_exclusion_list_size = 50
 enable_checkpointing = true
 checkpoint_interval = 24  # Save every N completed jobs (default: 10)
 
+# Dual dataset mode - generates two datasets simultaneously (default: false)
+# 1. dataset.jsonl - Regular responses (content only)
+# 2. dataset_reasoning.jsonl - Responses with <think> tags containing reasoning process
+# Useful for training reasoning-aware models or comparing reasoning vs non-reasoning datasets
+# Requires streaming mode (use_streaming = true) to capture reasoning_content from reasoning models
+# enable_reasoning_capture = false
+# reasoning_capture_rejected = false  # Also capture reasoning for rejected responses (optional)
+
 # Resume from session (optional)
 # Set to session directory name to resume: "session_2025-11-05T12-34-56"
 # Or use CLI: vellumforge2 checkpoint resume <session-dir>

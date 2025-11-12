@@ -197,10 +197,20 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create dataset writer (append mode for resume)
+	// Use dual dataset writer if reasoning capture is enabled
 	expectedRecords := cfg.Generation.NumSubtopics * cfg.Generation.NumPromptsPerSubtopic
-	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
-	if err != nil {
-		return fmt.Errorf("failed to create dataset writer: %w", err)
+	var dataWriter writer.Writer
+	if cfg.Generation.EnableReasoningCapture {
+		dataWriter, err = writer.NewDualDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
+		if err != nil {
+			return fmt.Errorf("failed to create dual dataset writer: %w", err)
+		}
+		logger.Info("Dual dataset mode enabled - will generate both regular and reasoning datasets")
+	} else {
+		dataWriter, err = writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
+		if err != nil {
+			return fmt.Errorf("failed to create dataset writer: %w", err)
+		}
 	}
 	defer func() {
 		if err := dataWriter.Close(); err != nil {
@@ -683,10 +693,20 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 	}
 
 	// Create dataset writer
+	// Use dual dataset writer if reasoning capture is enabled
 	expectedRecords := cfg.Generation.NumSubtopics * cfg.Generation.NumPromptsPerSubtopic
-	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
-	if err != nil {
-		return fmt.Errorf("failed to create dataset writer: %w", err)
+	var dataWriter writer.Writer
+	if cfg.Generation.EnableReasoningCapture {
+		dataWriter, err = writer.NewDualDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
+		if err != nil {
+			return fmt.Errorf("failed to create dual dataset writer: %w", err)
+		}
+		logger.Info("Dual dataset mode enabled - will generate both regular and reasoning datasets")
+	} else {
+		dataWriter, err = writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
+		if err != nil {
+			return fmt.Errorf("failed to create dataset writer: %w", err)
+		}
 	}
 	defer func() {
 		if err := dataWriter.Close(); err != nil {

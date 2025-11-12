@@ -52,7 +52,7 @@ type Orchestrator struct {
 	secrets       *config.Secrets
 	apiClient     *api.Client
 	judgeModule   *judge.Judge
-	dataWriter    *writer.DatasetWriter
+	dataWriter    writer.Writer
 	logger        *slog.Logger
 	stats         *models.SessionStats
 	checkpointMgr *checkpoint.Manager
@@ -69,7 +69,7 @@ func New(
 	cfg *config.Config,
 	secrets *config.Secrets,
 	apiClient *api.Client,
-	dataWriter *writer.DatasetWriter,
+	dataWriter writer.Writer,
 	checkpointMgr *checkpoint.Manager,
 	resumeMode bool,
 	logger *slog.Logger,
