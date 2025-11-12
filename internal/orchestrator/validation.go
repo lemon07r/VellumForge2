@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -26,7 +27,7 @@ var refusalPatterns = []string{
 // isRefusalResponse checks if a response contains refusal patterns
 func isRefusalResponse(text string) bool {
 	if len(strings.TrimSpace(text)) < 50 {
-		return true // Too short, likely a refusal
+		return true // Too short, likely a refusal or empty response
 	}
 
 	textLower := strings.ToLower(text)
@@ -41,7 +42,7 @@ func isRefusalResponse(text string) bool {
 // getRefusalReason returns a description of why the response was considered a refusal
 func getRefusalReason(text string) string {
 	if len(strings.TrimSpace(text)) < 50 {
-		return "response too short (< 50 chars)"
+		return fmt.Sprintf("response too short (< 50 chars): '%s'", strings.TrimSpace(text)[:min(40, len(strings.TrimSpace(text)))])
 	}
 
 	textLower := strings.ToLower(text)

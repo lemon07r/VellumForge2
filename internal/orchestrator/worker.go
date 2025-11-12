@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,6 +113,7 @@ func (o *Orchestrator) processJob(
 		logger.Warn("Chosen response refused",
 			"job_id", job.ID,
 			"reason", getRefusalReason(result.Chosen),
+			"response_length", len(strings.TrimSpace(result.Chosen)),
 			"prompt_preview", job.Prompt[:min(100, len(job.Prompt))])
 		return result
 	}
