@@ -68,12 +68,14 @@ type GenerationJob struct {
 
 // GenerationResult represents the result of generating a preference pair
 type GenerationResult struct {
-	Job         GenerationJob
-	Chosen      string
-	Rejected    string
-	JudgeResult *JudgeResult
-	Error       error
-	Duration    time.Duration
+	Job                GenerationJob
+	Chosen             string
+	ChosenReasoning    string // Chain-of-Thought reasoning for chosen response (if captured)
+	Rejected           string
+	RejectedReasoning  string // Chain-of-Thought reasoning for rejected response (if captured)
+	JudgeResult        *JudgeResult
+	Error              error
+	Duration           time.Duration
 }
 
 // JudgeResult represents the output from the LLM-as-a-Judge evaluation

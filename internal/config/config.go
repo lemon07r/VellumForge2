@@ -44,6 +44,8 @@ type GenerationConfig struct {
 	ResumeFromSession       string             `toml:"resume_from_session"`       // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
 	DatasetMode             models.DatasetMode `toml:"dataset_mode"`              // Dataset format: sft, dpo, kto, mo-dpo (default: mo-dpo)
 	IncludeTopicColumns     bool               `toml:"include_topic_columns"`     // For SFT mode: include main_topic/sub_topic columns (default: true)
+	EnableReasoningCapture  bool               `toml:"enable_reasoning_capture"`  // Capture reasoning from reasoning models (creates dual datasets)
+	ReasoningCaptureRejected bool              `toml:"reasoning_capture_rejected"` // Also capture reasoning for rejected responses (default: false)
 }
 
 // ModelConfig represents configuration for a single model endpoint

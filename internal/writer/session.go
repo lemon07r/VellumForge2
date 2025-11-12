@@ -63,6 +63,11 @@ func (sm *SessionManager) GetDatasetPath() string {
 	return filepath.Join(sm.sessionDir, "dataset.jsonl")
 }
 
+// GetReasoningDatasetPath returns the full path to the reasoning-aware dataset file
+func (sm *SessionManager) GetReasoningDatasetPath() string {
+	return filepath.Join(sm.sessionDir, "dataset_reasoning.jsonl")
+}
+
 // GetLogPath returns the full path to the session log file
 func (sm *SessionManager) GetLogPath() string {
 	return filepath.Join(sm.sessionDir, "session.log")

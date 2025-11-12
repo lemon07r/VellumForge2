@@ -19,8 +19,9 @@ type ResponseFormat struct {
 
 // Message represents a single message in the chat
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"` // For reasoning models (e.g., Kimi-K2-Thinking)
 }
 
 // ChatCompletionResponse represents an OpenAI-compatible chat completion response
@@ -42,9 +43,13 @@ type Choice struct {
 
 // Usage represents token usage information
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens           int `json:"prompt_tokens"`
+	CompletionTokens       int `json:"completion_tokens"`
+	TotalTokens            int `json:"total_tokens"`
+	ReasoningTokens        int `json:"reasoning_tokens,omitempty"`         // For reasoning models
+	CompletionTokensDetail struct {
+		ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+	} `json:"completion_tokens_details,omitempty"`
 }
 
 // ErrorResponse represents an API error response
