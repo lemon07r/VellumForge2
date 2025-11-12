@@ -91,6 +91,7 @@ high-quality Direct Preference Optimization (DPO) datasets using LLMs.`,
 	}
 
 	resumeCmd.Flags().StringVar(&configPath, "config", "config.toml", "Path to configuration file")
+	resumeCmd.Flags().StringVar(&envFile, "env-file", ".env", "Path to environment file")
 	resumeCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 
 	checkpointCmd.AddCommand(listCmd)
@@ -550,6 +551,15 @@ func inspectCheckpoint(cmd *cobra.Command, args []string) error {
 // resumeFromCheckpoint resumes generation from a checkpoint
 func resumeFromCheckpoint(cmd *cobra.Command, args []string) error {
 	sessionDir := args[0]
+
+	// Load environment variables from file if it exists
+	if envFile != "" {
+		if err := loadEnvFile(envFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load env file: %v\n", err)
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Loaded env file: %s\n", envFile)
+		}
+	}
 
 	// SECURITY: Validate session path to prevent path traversal (CWE-22)
 	if err := writer.ValidateSessionPath(sessionDir); err != nil {
