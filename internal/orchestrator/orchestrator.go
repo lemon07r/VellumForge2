@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/schollz/progressbar/v3"
+
 	"github.com/lamim/vellumforge2/internal/api"
 	"github.com/lamim/vellumforge2/internal/checkpoint"
 	"github.com/lamim/vellumforge2/internal/config"
@@ -16,7 +18,6 @@ import (
 	"github.com/lamim/vellumforge2/internal/util"
 	"github.com/lamim/vellumforge2/internal/writer"
 	"github.com/lamim/vellumforge2/pkg/models"
-	"github.com/schollz/progressbar/v3"
 )
 
 const (

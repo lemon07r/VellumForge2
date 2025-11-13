@@ -27,7 +27,7 @@ func TestStreamingForReasoning(t *testing.T) {
 	}
 
 	mainModel := cfg.Models["main"]
-	
+
 	// Construct request with streaming enabled
 	reqBody := map[string]interface{}{
 		"model": mainModel.ModelName,
@@ -69,7 +69,7 @@ func TestStreamingForReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	t.Logf("Response status: %d", resp.StatusCode)
 
@@ -81,10 +81,10 @@ func TestStreamingForReasoning(t *testing.T) {
 	var finalContent strings.Builder
 
 	t.Log("\n=== STREAMING CHUNKS ===")
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		// Skip empty lines
 		if len(strings.TrimSpace(line)) == 0 {
 			continue
@@ -93,7 +93,7 @@ func TestStreamingForReasoning(t *testing.T) {
 		// SSE format: "data: {...}"
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
-			
+
 			// Check for end marker
 			if data == "[DONE]" {
 				t.Log("Stream ended with [DONE]")
@@ -101,7 +101,7 @@ func TestStreamingForReasoning(t *testing.T) {
 			}
 
 			chunkCount++
-			
+
 			// Parse JSON
 			var chunk map[string]interface{}
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -128,7 +128,7 @@ func TestStreamingForReasoning(t *testing.T) {
 								t.Logf("✓ Found reasoning_content in chunk %d (length: %d)", chunkCount, len(rcStr))
 							}
 						}
-						
+
 						// Check for regular content
 						if content, exists := delta["content"]; exists {
 							if contentStr, ok := content.(string); ok {
@@ -154,7 +154,7 @@ func TestStreamingForReasoning(t *testing.T) {
 	if hasReasoningContent {
 		t.Logf("\n--- REASONING ---\n%s\n", reasoningContent.String())
 	}
-	
+
 	if finalContent.Len() > 0 {
 		t.Logf("\n--- FINAL ANSWER ---\n%s\n", finalContent.String())
 	}
@@ -177,7 +177,7 @@ func TestWithExplicitReasoningParameter(t *testing.T) {
 	}
 
 	mainModel := cfg.Models["main"]
-	
+
 	// Try different parameter combinations that might enable reasoning
 	testCases := []struct {
 		name   string
@@ -260,7 +260,7 @@ func TestWithExplicitReasoningParameter(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			bodyBytes, err := io.ReadAll(resp.Body)
 			if err != nil {

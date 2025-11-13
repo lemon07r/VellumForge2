@@ -29,7 +29,7 @@ func TestRawAPIResponse(t *testing.T) {
 	}
 
 	mainModel := cfg.Models["main"]
-	
+
 	// Construct request
 	reqBody := map[string]interface{}{
 		"model": mainModel.ModelName,
@@ -71,10 +71,10 @@ func TestRawAPIResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	t.Logf("Response status: %d %s", resp.StatusCode, resp.Status)
-	
+
 	// Read raw response body
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestRawAPIResponse(t *testing.T) {
 				for key := range message {
 					t.Logf("  - %s", key)
 				}
-				
+
 				if reasoningContent, exists := message["reasoning_content"]; exists {
 					t.Logf("\n✓ reasoning_content field EXISTS!")
 					if rc, ok := reasoningContent.(string); ok && rc != "" {
@@ -156,29 +156,29 @@ func TestAPIClientWithDebug(t *testing.T) {
 	}
 
 	mainModel := cfg.Models["main"]
-	
+
 	t.Logf("Making API call with model: %s", mainModel.ModelName)
 	t.Logf("Base URL: %s", mainModel.BaseURL)
 	t.Logf("Temperature: %f", mainModel.Temperature)
-	
+
 	resp, err := client.ChatCompletion(ctx, mainModel, apiKey, messages)
 	if err != nil {
 		t.Fatalf("ChatCompletion failed: %v", err)
 	}
 
 	message := resp.Choices[0].Message
-	
+
 	t.Logf("\n=== PARSED RESPONSE ===")
 	t.Logf("Content length: %d", len(message.Content))
 	t.Logf("ReasoningContent length: %d", len(message.ReasoningContent))
 	t.Logf("Has reasoning_content: %v", message.ReasoningContent != "")
-	
+
 	if message.ReasoningContent != "" {
 		t.Logf("\n--- REASONING ---\n%s\n", message.ReasoningContent)
 	}
-	
+
 	t.Logf("\n--- ANSWER ---\n%s\n", message.Content)
-	
+
 	t.Logf("\n=== USAGE ===")
 	t.Logf("Prompt tokens: %d", resp.Usage.PromptTokens)
 	t.Logf("Completion tokens: %d", resp.Usage.CompletionTokens)
@@ -238,7 +238,7 @@ func TestWithDifferentTemperatures(t *testing.T) {
 			t.Logf("Has reasoning_content: %v", message.ReasoningContent != "")
 			t.Logf("Reasoning length: %d", len(message.ReasoningContent))
 			t.Logf("Content length: %d", len(message.Content))
-			
+
 			if message.ReasoningContent != "" {
 				t.Logf("✓ Reasoning present at temp %.1f", temp)
 			}

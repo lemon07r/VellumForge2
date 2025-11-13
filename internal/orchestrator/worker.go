@@ -8,10 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/schollz/progressbar/v3"
+
 	"github.com/lamim/vellumforge2/internal/api"
 	"github.com/lamim/vellumforge2/internal/util"
 	"github.com/lamim/vellumforge2/pkg/models"
-	"github.com/schollz/progressbar/v3"
 )
 
 func (o *Orchestrator) worker(
@@ -83,20 +84,21 @@ func (o *Orchestrator) processJob(
 	})
 
 	var chosenResp *api.ChatCompletionResponse
-	
+
 	// Use streaming if enabled (bypasses gateway timeouts for long responses)
 	if mainModel.UseStreaming {
 		chosenResp, err = o.apiClient.ChatCompletionStreaming(ctx, mainModel, mainAPIKey, chosenMessages)
 	} else {
 		chosenResp, err = o.apiClient.ChatCompletion(ctx, mainModel, mainAPIKey, chosenMessages)
 	}
-	
+
 	if err != nil {
 		result.Error = fmt.Errorf("failed to generate chosen response: %w", err)
 		return result
 	}
 	result.Chosen = chosenResp.Choices[0].Message.Content
-	
+	finishReason := chosenResp.Choices[0].FinishReason
+
 	// Capture reasoning content if available (for dual dataset mode)
 	if chosenResp.Choices[0].Message.ReasoningContent != "" {
 		result.ChosenReasoning = chosenResp.Choices[0].Message.ReasoningContent
@@ -104,11 +106,27 @@ func (o *Orchestrator) processJob(
 			"job_id", job.ID,
 			"reasoning_length", len(result.ChosenReasoning))
 	}
-	
+
 	chosenDuration := time.Since(chosenStart)
 
+	// Check for token exhaustion during reasoning phase (thinking models)
+	// This happens when the model spends all tokens in reasoning_content and has none left for content
+	if len(strings.TrimSpace(result.Chosen)) == 0 && result.ChosenReasoning != "" && finishReason == "length" {
+		logger.Warn("Token exhaustion during reasoning phase - model consumed all tokens thinking",
+			"job_id", job.ID,
+			"reasoning_length", len(result.ChosenReasoning),
+			"finish_reason", finishReason,
+			"max_tokens", mainModel.MaxOutputTokens,
+			"prompt_preview", job.Prompt[:min(100, len(job.Prompt))])
+
+		result.Error = fmt.Errorf("token exhaustion: model consumed %d reasoning tokens with max_output_tokens=%d, increase token limit",
+			len(result.ChosenReasoning), mainModel.MaxOutputTokens)
+		return result
+	}
+
 	// Check for refusal in chosen response
-	if isRefusalResponse(result.Chosen) {
+	hasReasoning := result.ChosenReasoning != ""
+	if isRefusalResponse(result.Chosen, hasReasoning, finishReason) {
 		result.Error = fmt.Errorf("chosen response contains refusal: %s", getRefusalReason(result.Chosen))
 		logger.Warn("Chosen response refused",
 			"job_id", job.ID,
@@ -149,20 +167,20 @@ func (o *Orchestrator) processJob(
 		})
 
 		var rejectedResp *api.ChatCompletionResponse
-		
+
 		// Use streaming if enabled (bypasses gateway timeouts for long responses)
 		if rejectedModel.UseStreaming {
 			rejectedResp, err = o.apiClient.ChatCompletionStreaming(ctx, rejectedModel, rejectedAPIKey, rejectedMessages)
 		} else {
 			rejectedResp, err = o.apiClient.ChatCompletion(ctx, rejectedModel, rejectedAPIKey, rejectedMessages)
 		}
-		
+
 		if err != nil {
 			result.Error = fmt.Errorf("failed to generate rejected response: %w", err)
 			return result
 		}
 		result.Rejected = rejectedResp.Choices[0].Message.Content
-		
+
 		// Capture reasoning content if available and enabled (for dual dataset mode)
 		if o.cfg.Generation.ReasoningCaptureRejected && rejectedResp.Choices[0].Message.ReasoningContent != "" {
 			result.RejectedReasoning = rejectedResp.Choices[0].Message.ReasoningContent
@@ -170,7 +188,7 @@ func (o *Orchestrator) processJob(
 				"job_id", job.ID,
 				"reasoning_length", len(result.RejectedReasoning))
 		}
-		
+
 		rejectedDuration = time.Since(rejectedStart)
 
 		// Note: We do NOT filter rejected responses for refusal patterns.

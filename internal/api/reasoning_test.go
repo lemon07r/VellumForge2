@@ -53,8 +53,8 @@ Carol is behind Alice. What is the order from front to back?`,
 			expectedKeywords: []string{"Bob", "Alice", "Carol", "order"},
 		},
 		{
-			name: "Pattern Recognition",
-			prompt: `What is the next number in this sequence and why: 2, 6, 12, 20, 30, ?`,
+			name:             "Pattern Recognition",
+			prompt:           `What is the next number in this sequence and why: 2, 6, 12, 20, 30, ?`,
 			expectedKeywords: []string{"42", "pattern", "difference"},
 		},
 	}
@@ -249,7 +249,7 @@ Return ONLY a JSON object with this structure:
 	// Check for expected answer (23 chickens, 7 cows)
 	hasChickens := strings.Contains(response, "23")
 	hasCows := strings.Contains(response, "7")
-	
+
 	if hasChickens && hasCows {
 		t.Log("✓ Correct numbers (23, 7) found in response")
 	} else {
@@ -321,16 +321,16 @@ func TestReasoningContentField(t *testing.T) {
 
 			// Check if reasoning_content field is present
 			hasReasoning := message.ReasoningContent != ""
-			
+
 			if hasReasoning {
 				foundReasoning++
 				t.Log("✓ Model exposes reasoning via reasoning_content field")
-				
+
 				t.Logf("\n--- REASONING PROCESS ---\n%s\n", message.ReasoningContent)
 				t.Logf("\n--- FINAL ANSWER ---\n%s\n", message.Content)
-				
+
 				t.Logf("Reasoning length: %d characters", len(message.ReasoningContent))
-				
+
 				// Check for reasoning tokens in usage
 				if resp.Usage.ReasoningTokens > 0 {
 					t.Logf("Reasoning tokens: %d", resp.Usage.ReasoningTokens)
@@ -359,14 +359,15 @@ func TestReasoningContentField(t *testing.T) {
 	if totalReasoningTokens > 0 {
 		t.Logf("Total reasoning tokens across all tests: %d", totalReasoningTokens)
 	}
-	
-	if foundReasoning == 0 {
+
+	switch foundReasoning {
+	case 0:
 		t.Error("✗ Model does NOT expose reasoning via reasoning_content field")
 		t.Log("  This may indicate the API doesn't support the reasoning_content extension.")
 		t.Log("  Check if you're using a compatible endpoint (e.g., platform.moonshot.ai)")
-	} else if foundReasoning == totalTests {
+	case totalTests:
 		t.Log("✓ Model CONSISTENTLY exposes reasoning via reasoning_content field")
-	} else {
+	default:
 		t.Logf("⚠ Model SOMETIMES exposes reasoning (%d%% of responses)", (foundReasoning*100)/totalTests)
 	}
 }

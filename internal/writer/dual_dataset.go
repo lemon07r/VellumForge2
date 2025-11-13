@@ -47,14 +47,14 @@ func NewDualDatasetWriter(sessionMgr *SessionManager, logger *slog.Logger, resum
 	if resumeMode {
 		reasoningFile, err = os.OpenFile(reasoningPath, os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
-			regularFile.Close()
+			_ = regularFile.Close()
 			return nil, fmt.Errorf("failed to open reasoning dataset for append: %w", err)
 		}
 		logger.Info("Opened reasoning dataset for append", "path", reasoningPath)
 	} else {
 		reasoningFile, err = os.Create(reasoningPath)
 		if err != nil {
-			regularFile.Close()
+			_ = regularFile.Close()
 			return nil, fmt.Errorf("failed to create reasoning dataset: %w", err)
 		}
 		logger.Info("Created reasoning dataset", "path", reasoningPath)

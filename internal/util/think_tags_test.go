@@ -110,16 +110,16 @@ func TestStripThinkTags(t *testing.T) {
 
 func TestSplitThinkAndAnswer(t *testing.T) {
 	input := "<think>Let me solve this step by step\n1. First calculate x\n2. Then calculate y</think>The final answer is 42"
-	
+
 	thinking, answer := SplitThinkAndAnswer(input)
-	
+
 	expectedThinking := "Let me solve this step by step\n1. First calculate x\n2. Then calculate y"
 	expectedAnswer := "The final answer is 42"
-	
+
 	if thinking != expectedThinking {
 		t.Errorf("SplitThinkAndAnswer() thinking = %q, want %q", thinking, expectedThinking)
 	}
-	
+
 	if answer != expectedAnswer {
 		t.Errorf("SplitThinkAndAnswer() answer = %q, want %q", answer, expectedAnswer)
 	}

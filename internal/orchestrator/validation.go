@@ -25,8 +25,14 @@ var refusalPatterns = []string{
 }
 
 // isRefusalResponse checks if a response contains refusal patterns
-func isRefusalResponse(text string) bool {
+// For thinking models, distinguishes between actual refusals and token exhaustion during reasoning
+func isRefusalResponse(text string, hasReasoning bool, finishReason string) bool {
 	if len(strings.TrimSpace(text)) < 50 {
+		// If we have reasoning content and hit token limit, this is token exhaustion, not refusal
+		// This case is now handled separately in worker.go before calling this function
+		if hasReasoning && finishReason == "length" {
+			return false // Token exhaustion already handled upstream
+		}
 		return true // Too short, likely a refusal or empty response
 	}
 

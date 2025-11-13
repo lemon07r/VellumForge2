@@ -61,9 +61,9 @@ func TestStreamingWithReasoningContent(t *testing.T) {
 			}
 
 			mainModel := cfg.Models["main"]
-			
+
 			t.Logf("Testing STREAMING mode with prompt: %s", tc.prompt)
-			
+
 			resp, err := client.ChatCompletionStreaming(ctx, mainModel, apiKey, messages)
 			if err != nil {
 				t.Fatalf("ChatCompletionStreaming failed: %v", err)
@@ -80,7 +80,7 @@ func TestStreamingWithReasoningContent(t *testing.T) {
 			if hasReasoning {
 				foundReasoning++
 				t.Log("✓ Reasoning content found via STREAMING!")
-				
+
 				t.Logf("\n--- REASONING PROCESS ---\n%s\n", message.ReasoningContent)
 				t.Logf("\n--- FINAL ANSWER ---\n%s\n", message.Content)
 			} else {
@@ -100,12 +100,13 @@ func TestStreamingWithReasoningContent(t *testing.T) {
 	t.Logf("Model: %s", cfg.Models["main"].ModelName)
 	t.Logf("Tests with reasoning_content: %d/%d", foundReasoning, totalTests)
 
-	if foundReasoning == 0 {
+	switch foundReasoning {
+	case 0:
 		t.Error("✗ No reasoning content found in any streaming responses")
 		t.Log("  This suggests the model or endpoint may not support reasoning")
-	} else if foundReasoning == totalTests {
+	case totalTests:
 		t.Log("✓ ALL responses included reasoning content via streaming!")
-	} else {
+	default:
 		t.Logf("⚠ SOME responses included reasoning (%d%% success rate)", (foundReasoning*100)/totalTests)
 		t.Log("  Reasoning models may skip reasoning for simple queries")
 	}

@@ -29,23 +29,23 @@ type Config struct {
 
 // GenerationConfig holds generation-specific settings
 type GenerationConfig struct {
-	MainTopic               string             `toml:"main_topic"`
-	NumSubtopics            int                `toml:"num_subtopics"`
-	SubtopicChunkSize       int                `toml:"subtopic_chunk_size"` // Request subtopics in chunks (0=all at once, default: 30)
-	NumPromptsPerSubtopic   int                `toml:"num_prompts_per_subtopic"`
-	Concurrency             int                `toml:"concurrency"`
-	OverGenerationBuffer    float64            `toml:"over_generation_buffer"`    // Buffer percentage (0.0-1.0, default 0.15)
-	MaxExclusionListSize    int                `toml:"max_exclusion_list_size"`   // Max items in exclusion list (default 50)
-	MinSuccessRate          float64            `toml:"min_success_rate"`          // Minimum success rate for prompt generation (0.0-1.0, default 0.90)
-	PromptRetryAttempts     int                `toml:"prompt_retry_attempts"`     // Number of retry attempts for failed subtopics (default 2)
-	DisableValidationLimits bool               `toml:"disable_validation_limits"` // Disable upper bound validation (use with caution)
-	EnableCheckpointing     bool               `toml:"enable_checkpointing"`      // Enable checkpoint/resume support
-	CheckpointInterval      int                `toml:"checkpoint_interval"`       // Save checkpoint every N completed jobs (default: 10)
-	ResumeFromSession       string             `toml:"resume_from_session"`       // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
-	DatasetMode             models.DatasetMode `toml:"dataset_mode"`              // Dataset format: sft, dpo, kto, mo-dpo (default: mo-dpo)
-	IncludeTopicColumns     bool               `toml:"include_topic_columns"`     // For SFT mode: include main_topic/sub_topic columns (default: true)
-	EnableReasoningCapture  bool               `toml:"enable_reasoning_capture"`  // Capture reasoning from reasoning models (creates dual datasets)
-	ReasoningCaptureRejected bool              `toml:"reasoning_capture_rejected"` // Also capture reasoning for rejected responses (default: false)
+	MainTopic                string             `toml:"main_topic"`
+	NumSubtopics             int                `toml:"num_subtopics"`
+	SubtopicChunkSize        int                `toml:"subtopic_chunk_size"` // Request subtopics in chunks (0=all at once, default: 30)
+	NumPromptsPerSubtopic    int                `toml:"num_prompts_per_subtopic"`
+	Concurrency              int                `toml:"concurrency"`
+	OverGenerationBuffer     float64            `toml:"over_generation_buffer"`     // Buffer percentage (0.0-1.0, default 0.15)
+	MaxExclusionListSize     int                `toml:"max_exclusion_list_size"`    // Max items in exclusion list (default 50)
+	MinSuccessRate           float64            `toml:"min_success_rate"`           // Minimum success rate for prompt generation (0.0-1.0, default 0.90)
+	PromptRetryAttempts      int                `toml:"prompt_retry_attempts"`      // Number of retry attempts for failed subtopics (default 2)
+	DisableValidationLimits  bool               `toml:"disable_validation_limits"`  // Disable upper bound validation (use with caution)
+	EnableCheckpointing      bool               `toml:"enable_checkpointing"`       // Enable checkpoint/resume support
+	CheckpointInterval       int                `toml:"checkpoint_interval"`        // Save checkpoint every N completed jobs (default: 10)
+	ResumeFromSession        string             `toml:"resume_from_session"`        // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
+	DatasetMode              models.DatasetMode `toml:"dataset_mode"`               // Dataset format: sft, dpo, kto, mo-dpo (default: mo-dpo)
+	IncludeTopicColumns      bool               `toml:"include_topic_columns"`      // For SFT mode: include main_topic/sub_topic columns (default: true)
+	EnableReasoningCapture   bool               `toml:"enable_reasoning_capture"`   // Capture reasoning from reasoning models (creates dual datasets)
+	ReasoningCaptureRejected bool               `toml:"reasoning_capture_rejected"` // Also capture reasoning for rejected responses (default: false)
 }
 
 // ModelConfig represents configuration for a single model endpoint

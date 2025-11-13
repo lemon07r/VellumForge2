@@ -214,7 +214,7 @@ func (c *Client) doStreamingRequest(
 			Retryable:  true,
 		}
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	// Check status code
 	if httpResp.StatusCode != http.StatusOK {
