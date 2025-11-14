@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -237,6 +238,9 @@ func (c *Client) doStreamingRequest(
 		}
 	}
 
+	// Optional verbose SSE logging for debugging provider issues
+	debugStreaming := os.Getenv("VF_DEBUG_STREAMING") == "1"
+
 	// Read streaming response
 	var responseContent strings.Builder
 	var reasoningContent strings.Builder
@@ -260,6 +264,13 @@ func (c *Client) doStreamingRequest(
 
 			// Check for end marker
 			if data == "[DONE]" {
+				if debugStreaming {
+					c.logger.Debug("Streaming SSE received DONE marker",
+						"endpoint", baseURL,
+						"response_id", responseID,
+						"model", responseModel,
+					)
+				}
 				break
 			}
 
@@ -279,7 +290,8 @@ func (c *Client) doStreamingRequest(
 
 			// Extract content from delta
 			if len(chunk.Choices) > 0 {
-				delta := chunk.Choices[0].Delta
+				choice := chunk.Choices[0]
+				delta := choice.Delta
 
 				// Append regular content
 				if delta.Content != "" {
@@ -292,8 +304,25 @@ func (c *Client) doStreamingRequest(
 				}
 
 				// Check finish reason
-				if chunk.Choices[0].FinishReason != nil && *chunk.Choices[0].FinishReason != "" {
-					finishReason = *chunk.Choices[0].FinishReason
+				if choice.FinishReason != nil && *choice.FinishReason != "" {
+					finishReason = *choice.FinishReason
+				}
+
+				if debugStreaming {
+					fr := ""
+					if choice.FinishReason != nil {
+						fr = *choice.FinishReason
+					}
+
+					c.logger.Debug("Streaming SSE chunk",
+						"endpoint", baseURL,
+						"chunk_id", chunk.ID,
+						"model", chunk.Model,
+						"created", chunk.Created,
+						"delta_len", len(delta.Content),
+						"reasoning_len", len(delta.ReasoningContent),
+						"finish_reason", fr,
+					)
 				}
 			}
 		}
