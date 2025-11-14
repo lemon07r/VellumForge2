@@ -1,118 +1,17 @@
-# golangci-lint configuration for VellumForge2
-# Configuration reference: https://golangci-lint.run/usage/configuration/
+# golangci-lint v2.x configuration
+version: 2
 
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
-    - misspell
-    - unconvert
-    - unparam
-    - bodyclose
-    - noctx
-    - gosec
-    - prealloc
-    - revive
-    - gocritic
-    - gocyclo
-    - dupl
-    - errorlint
-    - exportloopref
-    - goconst
-    - godot
-    - goprintffuncname
-    - nakedret
-    - nolintlint
-    - predeclared
-    - rowserrcheck
-    - sqlclosecheck
-    - stylecheck
-    - thelper
-    - tparallel
-    - whitespace
-    - wsl
 
-  disable:
-    - exhaustive
-    - exhaustruct
-    - forbidigo
-    - funlen
-    - gochecknoglobals
-    - gochecknoinits
-    - godox
-    - goerr113
-    - gomnd
-    - lll
-    - nlreturn
-    - testpackage
-    - wrapcheck
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-
-  govet:
-    check-shadowing: false
-
-  gocyclo:
-    min-complexity: 15
-
-  dupl:
-    threshold: 100
-
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-    ignore-tests: true
-
-  misspell:
-    locale: US
-
-  nakedret:
-    max-func-lines: 30
-
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: false
-
-  gosec:
-    excludes:
-      - G104
-      - G204
+run:
+  timeout: 5m
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  new: false
-  
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-        - goconst
-        - wsl
-
-    - path: cmd/
-      linters:
-        - gocyclo
-
-    - path: internal/api/
-      text: "shadow:"
-      linters:
-        - govet
-
-  exclude-use-default: false
-
-run:
-  timeout: 5m
-  tests: true

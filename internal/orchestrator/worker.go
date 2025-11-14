@@ -124,14 +124,39 @@ func (o *Orchestrator) processJob(
 		return result
 	}
 
-	// Check for refusal in chosen response
+	// Validate finish_reason
 	hasReasoning := result.ChosenReasoning != ""
+	if valid, reason := validateFinishReason(finishReason, hasReasoning, len(strings.TrimSpace(result.Chosen))); !valid {
+		result.Error = fmt.Errorf("invalid completion: %s", reason)
+		logger.Warn("Invalid finish_reason",
+			"job_id", job.ID,
+			"finish_reason", finishReason,
+			"reason", reason,
+			"response_length", len(strings.TrimSpace(result.Chosen)),
+			"prompt_preview", job.Prompt[:min(100, len(job.Prompt))])
+		return result
+	}
+
+	// Check for refusal in chosen response
 	if isRefusalResponse(result.Chosen, hasReasoning, finishReason) {
 		result.Error = fmt.Errorf("chosen response contains refusal: %s", getRefusalReason(result.Chosen))
 		logger.Warn("Chosen response refused",
 			"job_id", job.ID,
 			"reason", getRefusalReason(result.Chosen),
 			"response_length", len(strings.TrimSpace(result.Chosen)),
+			"prompt_preview", job.Prompt[:min(100, len(job.Prompt))])
+		return result
+	}
+
+	// Check for incomplete output (streaming interruption)
+	if incomplete, reason := isIncompleteOutput(result.Chosen, finishReason); incomplete {
+		result.Error = fmt.Errorf("incomplete output detected: %s", reason)
+		logger.Warn("Incomplete output detected",
+			"job_id", job.ID,
+			"reason", reason,
+			"finish_reason", finishReason,
+			"response_length", len(strings.TrimSpace(result.Chosen)),
+			"last_100_chars", result.Chosen[max(0, len(result.Chosen)-100):],
 			"prompt_preview", job.Prompt[:min(100, len(job.Prompt))])
 		return result
 	}

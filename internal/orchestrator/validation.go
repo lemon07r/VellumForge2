@@ -59,3 +59,75 @@ func getRefusalReason(text string) string {
 	}
 	return "unknown refusal"
 }
+
+// isIncompleteOutput checks if a response appears to be cut off mid-generation
+// This detects streaming interruptions where partial content was returned
+func isIncompleteOutput(text string, finishReason string) (bool, string) {
+	trimmed := strings.TrimSpace(text)
+	
+	// Very short outputs are likely incomplete (already caught by refusal check)
+	if len(trimmed) < 100 {
+		return true, "output too short (< 100 chars)"
+	}
+
+	// If finish_reason is 'length', it hit token limit (not incomplete, just maxed out)
+	// This is different from streaming interruptions
+	if finishReason == "length" {
+		return false, "" // Not incomplete, just reached max tokens
+	}
+
+	// Check if output ends with terminal punctuation
+	lastChar := trimmed[len(trimmed)-1]
+	if lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != '"' && lastChar != '\'' {
+		// Check if the last "word" looks incomplete (lowercase, suggesting mid-sentence)
+		words := strings.Fields(trimmed)
+		if len(words) > 0 {
+			lastWord := words[len(words)-1]
+			// Remove trailing punctuation for checking
+			lastWord = strings.TrimRight(lastWord, ".,;:!?\"'")
+			
+			// If last word is longer than 2 chars and ends with lowercase letter,
+			// likely a mid-sentence cutoff
+			if len(lastWord) > 2 {
+				lastRune := rune(lastWord[len(lastWord)-1])
+				if lastRune >= 'a' && lastRune <= 'z' {
+					return true, fmt.Sprintf("incomplete ending: does not end with terminal punctuation, last word '%s' suggests mid-sentence cutoff", lastWord)
+				}
+			}
+		}
+		
+		// Ends with non-terminal punctuation but not obviously incomplete
+		return true, "no terminal punctuation (.!?\"') at end"
+	}
+
+	// Output appears complete
+	return false, ""
+}
+
+// validateFinishReason checks if the API response completed successfully
+func validateFinishReason(finishReason string, hasReasoning bool, contentLength int) (bool, string) {
+	// Empty finish_reason can happen with some API implementations (e.g., nahcrof streaming)
+	// Don't fail immediately - let isIncompleteOutput() do the actual content validation
+	if finishReason == "" {
+		// Return true but we'll rely on isIncompleteOutput() to validate actual completion
+		return true, ""
+	}
+
+	// 'stop' means normal completion
+	if finishReason == "stop" {
+		return true, ""
+	}
+
+	// 'length' means hit token limit - this is handled separately
+	if finishReason == "length" {
+		// If we have reasoning and no content, this is token exhaustion (handled upstream)
+		if hasReasoning && contentLength == 0 {
+			return false, "token exhaustion during reasoning phase"
+		}
+		// Otherwise it's just a very long output that hit the limit (acceptable)
+		return true, ""
+	}
+
+	// Any other finish_reason is unexpected
+	return false, fmt.Sprintf("unexpected finish_reason: %s", finishReason)
+}

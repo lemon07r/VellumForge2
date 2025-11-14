@@ -17,6 +17,8 @@ go.work
 .env
 *.env
 !.env.example
+.env.*
+!.env.*.example
 
 # Output directory with all session data
 output/
