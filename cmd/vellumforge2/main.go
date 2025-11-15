@@ -93,6 +93,8 @@ high-quality Direct Preference Optimization (DPO) datasets using LLMs.`,
 
 	resumeCmd.Flags().StringVar(&configPath, "config", "config.toml", "Path to configuration file")
 	resumeCmd.Flags().StringVar(&envFile, "env-file", ".env", "Path to environment file")
+	resumeCmd.Flags().BoolVar(&uploadToHF, "upload-to-hf", false, "Upload results to Hugging Face Hub after resume completes")
+	resumeCmd.Flags().StringVar(&hfRepoID, "hf-repo-id", "", "Hugging Face repository ID (e.g., username/dataset-name) for resume uploads")
 	resumeCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 
 	checkpointCmd.AddCommand(listCmd)
@@ -246,25 +248,8 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 		"duration", stats.TotalDuration,
 		"session_dir", sessionMgr.GetSessionDir())
 
-	// Optional: Upload to Hugging Face
-	if uploadToHF {
-		if hfRepoID == "" && cfg.HuggingFace.RepoID == "" {
-			return fmt.Errorf("--hf-repo-id must be specified when using --upload-to-hf")
-		}
-
-		repoID := hfRepoID
-		if repoID == "" {
-			repoID = cfg.HuggingFace.RepoID
-		}
-
-		if secrets.HuggingFaceToken == "" {
-			return fmt.Errorf("HUGGING_FACE_TOKEN environment variable must be set for uploads")
-		}
-
-		uploader := hfhub.NewUploader(secrets.HuggingFaceToken, logger)
-		if err := uploader.Upload(repoID, sessionMgr.GetSessionDir()); err != nil {
-			return fmt.Errorf("upload failed: %w", err)
-		}
+	if err := maybeUploadToHuggingFace(cfg, secrets, sessionMgr, logger); err != nil {
+		return err
 	}
 
 	logger.Info("All done! 🎉")
@@ -741,7 +726,37 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 		"duration", stats.TotalDuration,
 		"session_dir", sessionMgr.GetSessionDir())
 
+	if err := maybeUploadToHuggingFace(cfg, secrets, sessionMgr, logger); err != nil {
+		return err
+	}
+
 	logger.Info("All done! 🎉")
+	return nil
+}
+
+func maybeUploadToHuggingFace(cfg *config.Config, secrets *config.Secrets, sessionMgr *writer.SessionManager, logger *slog.Logger) error {
+	if !uploadToHF {
+		return nil
+	}
+
+	if hfRepoID == "" && cfg.HuggingFace.RepoID == "" {
+		return fmt.Errorf("--hf-repo-id must be specified when using --upload-to-hf")
+	}
+
+	repoID := hfRepoID
+	if repoID == "" {
+		repoID = cfg.HuggingFace.RepoID
+	}
+
+	if secrets.HuggingFaceToken == "" {
+		return fmt.Errorf("HUGGING_FACE_TOKEN environment variable must be set for uploads")
+	}
+
+	uploader := hfhub.NewUploader(secrets.HuggingFaceToken, logger)
+	if err := uploader.Upload(repoID, sessionMgr.GetSessionDir()); err != nil {
+		return fmt.Errorf("upload failed: %w", err)
+	}
+
 	return nil
 }
 

@@ -64,7 +64,7 @@ func getRefusalReason(text string) string {
 // This detects streaming interruptions where partial content was returned
 func isIncompleteOutput(text string, finishReason string) (bool, string) {
 	trimmed := strings.TrimSpace(text)
-	
+
 	// Very short outputs are likely incomplete (already caught by refusal check)
 	if len(trimmed) < 100 {
 		return true, "output too short (< 100 chars)"
@@ -85,7 +85,7 @@ func isIncompleteOutput(text string, finishReason string) (bool, string) {
 			lastWord := words[len(words)-1]
 			// Remove trailing punctuation for checking
 			lastWord = strings.TrimRight(lastWord, ".,;:!?\"'")
-			
+
 			// If last word is longer than 2 chars and ends with lowercase letter,
 			// likely a mid-sentence cutoff
 			if len(lastWord) > 2 {
@@ -95,7 +95,7 @@ func isIncompleteOutput(text string, finishReason string) (bool, string) {
 				}
 			}
 		}
-		
+
 		// Ends with non-terminal punctuation but not obviously incomplete
 		return true, "no terminal punctuation (.!?\"') at end"
 	}

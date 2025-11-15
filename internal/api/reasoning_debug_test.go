@@ -18,6 +18,10 @@ import (
 // TestRawAPIResponse makes a raw API call and dumps the complete JSON response
 // This helps us see exactly what the API is returning
 func TestRawAPIResponse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
@@ -129,6 +133,10 @@ func TestRawAPIResponse(t *testing.T) {
 
 // TestAPIClientWithDebug tests using our API client with debug logging
 func TestAPIClientWithDebug(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
@@ -195,6 +203,10 @@ func truncate(s string, maxLen int) string {
 
 // TestWithDifferentTemperatures tests if temperature affects reasoning output
 func TestWithDifferentTemperatures(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)

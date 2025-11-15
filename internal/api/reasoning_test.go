@@ -13,6 +13,10 @@ import (
 
 // TestReasoningCapabilities tests the reasoning model with prompts that require logical thinking
 func TestReasoningCapabilities(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	// Load config to get model settings
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
@@ -124,6 +128,10 @@ Carol is behind Alice. What is the order from front to back?`,
 
 // TestReasoningWithSystemPrompt tests reasoning with a system prompt
 func TestReasoningWithSystemPrompt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
@@ -186,6 +194,10 @@ Show your work step by step.`,
 
 // TestReasoningStructuredOutput tests reasoning with structured JSON output
 func TestReasoningStructuredOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
@@ -259,6 +271,10 @@ Return ONLY a JSON object with this structure:
 
 // TestReasoningContentField tests if the model exposes reasoning via the reasoning_content field
 func TestReasoningContentField(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)

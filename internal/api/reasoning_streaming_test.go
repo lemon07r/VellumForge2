@@ -12,6 +12,10 @@ import (
 
 // TestStreamingWithReasoningContent tests the streaming API with reasoning models
 func TestStreamingWithReasoningContent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
@@ -114,6 +118,10 @@ func TestStreamingWithReasoningContent(t *testing.T) {
 
 // TestStreamingVsNonStreaming compares streaming vs non-streaming responses
 func TestStreamingVsNonStreaming(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)

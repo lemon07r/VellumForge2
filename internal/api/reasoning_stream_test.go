@@ -16,6 +16,10 @@ import (
 
 // TestStreamingForReasoning tests if streaming mode exposes reasoning_content
 func TestStreamingForReasoning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
@@ -166,6 +170,10 @@ func TestStreamingForReasoning(t *testing.T) {
 
 // TestWithExplicitReasoningParameter tests if there's a parameter to enable reasoning
 func TestWithExplicitReasoningParameter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	cfg, _, err := config.Load("../../config.sft.toml")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
