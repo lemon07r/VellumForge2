@@ -233,10 +233,12 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 
 	// Phase 3: Generate preference pairs concurrently (with resume filtering)
 	pendingJobs := prompts
+	initialProgress := 0
 	if o.resumeMode && o.checkpointMgr != nil {
 		cp := o.checkpointMgr.GetCheckpoint()
 		pendingJobs = checkpoint.GetPendingJobs(cp)
 		completed := len(prompts) - len(pendingJobs)
+		initialProgress = completed
 		o.logger.Info("Resuming from checkpoint: preference pairs phase",
 			"total", len(prompts),
 			"completed", completed,
@@ -251,7 +253,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		go o.judgeUpdater(updaterCtx)
 	}
 
-	if err := o.generatePreferencePairs(ctx, pendingJobs); err != nil {
+	if err := o.generatePreferencePairs(ctx, pendingJobs, initialProgress); err != nil {
 		return fmt.Errorf("failed to generate preference pairs: %w", err)
 	}
 
@@ -865,7 +867,7 @@ func (o *Orchestrator) generatePromptsForSubtopic(ctx context.Context, subtopic 
 	return prompts, nil
 }
 
-func (o *Orchestrator) generatePreferencePairs(ctx context.Context, jobs []models.GenerationJob) error {
+func (o *Orchestrator) generatePreferencePairs(ctx context.Context, jobs []models.GenerationJob, initialProgress int) error {
 	o.logger.Info("Generating preference pairs", "total_jobs", len(jobs), "concurrency", o.cfg.Generation.Concurrency)
 
 	// Create channels
@@ -888,7 +890,7 @@ func (o *Orchestrator) generatePreferencePairs(ctx context.Context, jobs []model
 	// Start result collector
 	var collectorWg sync.WaitGroup
 	collectorWg.Add(1)
-	go o.collectResults(resultsChan, &collectorWg)
+	go o.collectResults(resultsChan, &collectorWg, initialProgress)
 
 	// Wait for workers to finish
 	wg.Wait()

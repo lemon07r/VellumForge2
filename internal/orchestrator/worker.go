@@ -238,10 +238,17 @@ func (o *Orchestrator) processJob(
 	return result
 }
 
-func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg *sync.WaitGroup) {
+func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg *sync.WaitGroup, initialProgress int) {
 	defer wg.Done()
 
 	bar := progressbar.Default(int64(o.stats.TotalPrompts), "Processing")
+
+	if initialProgress > 0 {
+		if initialProgress > o.stats.TotalPrompts {
+			initialProgress = o.stats.TotalPrompts
+		}
+		_ = bar.Add(initialProgress)
+	}
 
 	for result := range results {
 		if result.Error != nil {
