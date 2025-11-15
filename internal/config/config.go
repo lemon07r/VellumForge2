@@ -43,6 +43,7 @@ type GenerationConfig struct {
 	CheckpointInterval       int                `toml:"checkpoint_interval"`        // Save checkpoint every N completed jobs (default: 10)
 	ResumeFromSession        string             `toml:"resume_from_session"`        // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
 	DatasetMode              models.DatasetMode `toml:"dataset_mode"`               // Dataset format: sft, dpo, kto, mo-dpo (default: mo-dpo)
+	SFTFormat                models.SFTFormat   `toml:"sft_format"`                 // SFT output format (alpaca/sharegpt)
 	IncludeTopicColumns      bool               `toml:"include_topic_columns"`      // For SFT mode: include main_topic/sub_topic columns (default: true)
 	EnableReasoningCapture   bool               `toml:"enable_reasoning_capture"`   // Capture reasoning from reasoning models (creates dual datasets)
 	ReasoningCaptureRejected bool               `toml:"reasoning_capture_rejected"` // Also capture reasoning for rejected responses (default: false)
@@ -127,6 +128,18 @@ func (c *Config) Validate() error {
 	}
 	if !validMode {
 		return fmt.Errorf("generation.dataset_mode must be one of: sft, dpo, kto, mo-dpo (got %s)", c.Generation.DatasetMode)
+	}
+
+	// Validate SFT format selection
+	if c.Generation.DatasetMode == models.DatasetModeSFT {
+		switch c.Generation.SFTFormat {
+		case "", models.SFTFormatAlpaca, models.SFTFormatShareGPT:
+			if c.Generation.SFTFormat == "" {
+				c.Generation.SFTFormat = models.SFTFormatShareGPT
+			}
+		default:
+			return fmt.Errorf("generation.sft_format must be 'alpaca' or 'sharegpt' (got %s)", c.Generation.SFTFormat)
+		}
 	}
 
 	// Validate generation config

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/lamim/vellumforge2/internal/util"
@@ -91,10 +92,7 @@ func (dw *DualDatasetWriter) WriteSFTRecord(record models.SFTRecord, reasoning s
 	}
 
 	// Write reasoning record (with think tags if reasoning present)
-	reasoningRecord := record
-	if reasoning != "" {
-		reasoningRecord.Output = util.CombineReasoningAndContent(reasoning, record.Output)
-	}
+	reasoningRecord := applyReasoningToSFTRecord(record, reasoning)
 
 	reasoningData, err := json.Marshal(reasoningRecord)
 	if err != nil {
@@ -175,6 +173,38 @@ func (dw *DualDatasetWriter) WriteKTORecord(record models.KTORecord, reasoning s
 	}
 
 	return nil
+}
+
+// applyReasoningToSFTRecord returns a copy of record with reasoning merged into the answer portion
+func applyReasoningToSFTRecord(record models.SFTRecord, reasoning string) models.SFTRecord {
+	if reasoning == "" {
+		return record
+	}
+
+	reasoningRecord := record
+
+	if len(reasoningRecord.Conversations) > 0 {
+		for i := len(reasoningRecord.Conversations) - 1; i >= 0; i-- {
+			from := strings.ToLower(reasoningRecord.Conversations[i].From)
+			if from == "gpt" || from == "assistant" {
+				reasoningRecord.Conversations[i].Value = util.CombineReasoningAndContent(
+					reasoning,
+					reasoningRecord.Conversations[i].Value,
+				)
+				return reasoningRecord
+			}
+		}
+
+		// If no assistant turn found, append one containing the reasoning+content
+		reasoningRecord.Conversations = append(reasoningRecord.Conversations, models.ShareGPTMessage{
+			From:  "gpt",
+			Value: util.CombineReasoningAndContent(reasoning, ""),
+		})
+		return reasoningRecord
+	}
+
+	reasoningRecord.Output = util.CombineReasoningAndContent(reasoning, record.Output)
+	return reasoningRecord
 }
 
 // WriteRecord writes a buffered record (for MO-DPO mode with async judge)

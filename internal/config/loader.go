@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/lamim/vellumforge2/pkg/models"
 )
 
 // Load reads and parses the configuration file and environment variables
@@ -70,6 +72,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Generation.PromptRetryAttempts == 0 {
 		cfg.Generation.PromptRetryAttempts = 2 // 2 retry attempts by default
+	}
+	if cfg.Generation.SFTFormat == "" {
+		cfg.Generation.SFTFormat = models.SFTFormatShareGPT
 	}
 
 	// Apply defaults for each model

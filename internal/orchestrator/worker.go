@@ -344,18 +344,39 @@ func (o *Orchestrator) writeRecordByMode(result models.GenerationResult) error {
 
 // writeSFTRecord writes a simple instruction-output record
 func (o *Orchestrator) writeSFTRecord(result models.GenerationResult) error {
-	record := models.SFTRecord{
-		Instruction: result.Job.Prompt,
-		Output:      result.Chosen,
+	format := o.cfg.Generation.SFTFormat
+	if format == "" {
+		format = models.SFTFormatShareGPT
 	}
 
-	// Optionally include topic columns
-	if o.cfg.Generation.IncludeTopicColumns {
-		record.MainTopic = result.Job.MainTopic
-		record.SubTopic = result.Job.SubTopic
-	}
+	switch format {
+	case models.SFTFormatAlpaca:
+		record := models.SFTRecord{
+			Instruction: result.Job.Prompt,
+			Output:      result.Chosen,
+		}
+		if o.cfg.Generation.IncludeTopicColumns {
+			record.MainTopic = result.Job.MainTopic
+			record.SubTopic = result.Job.SubTopic
+		}
+		return o.dataWriter.WriteSFTRecord(record, result.ChosenReasoning)
 
-	return o.dataWriter.WriteSFTRecord(record, result.ChosenReasoning)
+	case models.SFTFormatShareGPT:
+		record := models.SFTRecord{
+			Conversations: []models.ShareGPTMessage{
+				{From: "human", Value: result.Job.Prompt},
+				{From: "gpt", Value: result.Chosen},
+			},
+		}
+		if o.cfg.Generation.IncludeTopicColumns {
+			record.MainTopic = result.Job.MainTopic
+			record.SubTopic = result.Job.SubTopic
+		}
+		return o.dataWriter.WriteSFTRecord(record, result.ChosenReasoning)
+
+	default:
+		return fmt.Errorf("unsupported SFT format: %s", format)
+	}
 }
 
 // writeDPORecord writes a standard DPO preference pair

@@ -82,6 +82,9 @@ max_exclusion_list_size = 50
 # Ignored for other modes
 # include_topic_columns = true
 
+# SFT output format ("alpaca" or "sharegpt", default: "sharegpt")
+# sft_format = "sharegpt"
+
 # Checkpoint/resume functionality
 enable_checkpointing = true
 checkpoint_interval = 24  # Save every N completed jobs (default: 10)
