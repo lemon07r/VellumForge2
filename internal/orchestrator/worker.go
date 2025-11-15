@@ -15,6 +15,8 @@ import (
 	"github.com/lamim/vellumforge2/pkg/models"
 )
 
+const resumeProgressRenderDelay = 100 * time.Millisecond
+
 func (o *Orchestrator) worker(
 	ctx context.Context,
 	workerID int,
@@ -247,6 +249,7 @@ func (o *Orchestrator) collectResults(results <-chan models.GenerationResult, wg
 		if initialProgress > o.stats.TotalPrompts {
 			initialProgress = o.stats.TotalPrompts
 		}
+		time.Sleep(resumeProgressRenderDelay)
 		_ = bar.Add(initialProgress)
 	}
 
