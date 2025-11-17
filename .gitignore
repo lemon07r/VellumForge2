@@ -22,6 +22,7 @@ go.work
 
 # Output directory with all session data
 output/
+results.json
 
 # IDE
 .vscode/

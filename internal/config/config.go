@@ -325,6 +325,12 @@ func LoadSecrets() (*Secrets, error) {
 	if key := os.Getenv("TOGETHER_API_KEY"); key != "" {
 		secrets.APIKeys["together"] = key
 	}
+	if key := os.Getenv("CHUTES_API_KEY"); key != "" {
+		secrets.APIKeys["chutes"] = key
+	}
+	if key := os.Getenv("NAHCROF_API_KEY"); key != "" {
+		secrets.APIKeys["nahcrof"] = key
+	}
 
 	// Load Hugging Face token
 	secrets.HuggingFaceToken = os.Getenv("HUGGING_FACE_TOKEN")
@@ -355,6 +361,16 @@ func (s *Secrets) GetAPIKey(baseURL string) string {
 			return key
 		}
 	}
+	if contains(baseURL, "llm.chutes.ai") {
+		if key := s.APIKeys["chutes"]; key != "" {
+			return key
+		}
+	}
+	if contains(baseURL, "ai.nahcrof.com") {
+		if key := s.APIKeys["nahcrof"]; key != "" {
+			return key
+		}
+	}
 
 	// Fall back to generic API_KEY for any OpenAI-compatible provider
 	if key := s.APIKeys["generic"]; key != "" {
@@ -379,6 +395,12 @@ func GetProviderName(baseURL string) string {
 	}
 	if contains(baseURL, "together.xyz") || contains(baseURL, "together.ai") {
 		return "together"
+	}
+	if contains(baseURL, "llm.chutes.ai") {
+		return "chutes"
+	}
+	if contains(baseURL, "ai.nahcrof.com") {
+		return "nahcrof"
 	}
 	// For localhost or unknown providers, use the full base URL as provider name
 	return baseURL
