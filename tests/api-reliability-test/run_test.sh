@@ -60,7 +60,7 @@ case "$PROVIDERS" in
         run_provider_test chutes
         ;;
     both)
-        echo "Testing both providers (this will take ~30-45 minutes total)"
+        echo "Testing both providers (this will take ~10-15 minutes total)"
         echo ""
         run_provider_test nahcrof
         echo ""
