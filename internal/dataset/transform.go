@@ -30,8 +30,10 @@ const (
 
 // Options controls dataset transformation behaviour.
 type Options struct {
-	InputPath  string
-	OutputPath string
+	InputPath           string
+	OutputPath          string
+	InputReasoningPath  string
+	OutputReasoningPath string
 
 	// Concurrency controls how many rejected generations run in parallel.
 	Concurrency int
@@ -49,6 +51,8 @@ type transformCheckpoint struct {
 	Mode          TransformMode `json:"mode"`
 	InputPath     string        `json:"input_path"`
 	OutputPath    string        `json:"output_path"`
+	InputReasoningPath  string `json:"input_reasoning_path,omitempty"`
+	OutputReasoningPath string `json:"output_reasoning_path,omitempty"`
 	TotalJobs     int           `json:"total_jobs"`
 	CompletedJobs int           `json:"completed_jobs"`
 	LastUpdated   time.Time     `json:"last_updated"`
@@ -68,13 +72,28 @@ func Run(
 	client *api.Client,
 	opts Options,
 ) error {
-	if opts.InputPath == "" {
-		return fmt.Errorf("input path is required")
+	// Validate required paths based on mode
+	switch mode {
+	case TransformSFTToDPO:
+		if opts.InputPath == "" {
+			return fmt.Errorf("input path is required for sft-to-dpo mode")
+		}
+		if opts.OutputPath == "" {
+			return fmt.Errorf("output path is required for sft-to-dpo mode")
+		}
+	case TransformRegenRejected:
+		if opts.InputPath == "" && opts.InputReasoningPath == "" {
+			return fmt.Errorf("at least one of input or input_reasoning path is required for regen-rejected mode")
+		}
+		if opts.OutputPath == "" && opts.OutputReasoningPath == "" {
+			return fmt.Errorf("at least one of output or output_reasoning path is required for regen-rejected mode")
+		}
+		if opts.OutputReasoningPath != "" && opts.InputReasoningPath == "" {
+			return fmt.Errorf("output_reasoning requires input_reasoning for regen-rejected mode")
+		}
+	default:
+		return fmt.Errorf("unsupported transform mode: %s", mode)
 	}
-	if opts.OutputPath == "" {
-		return fmt.Errorf("output path is required")
-	}
-
 	// Ensure rejected model is configured; both modes rely on it.
 	rejectedModel, ok := cfg.Models["rejected"]
 	if !ok {
@@ -100,13 +119,26 @@ func Run(
 		}
 	}
 	if opts.CheckpointPath == "" {
-		opts.CheckpointPath = opts.OutputPath + ".checkpoint.json"
+		base := opts.OutputPath
+		if base == "" {
+			base = opts.OutputReasoningPath
+		}
+		opts.CheckpointPath = base + ".checkpoint.json"
 	}
 
-	// Ensure output directory exists (mirrors behaviour of main pipeline).
-	if dir := filepath.Dir(opts.OutputPath); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("failed to create output directory: %w", err)
+	// Ensure output directories exist (mirrors behaviour of main pipeline).
+	if opts.OutputPath != "" {
+		if dir := filepath.Dir(opts.OutputPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("failed to create output directory: %w", err)
+			}
+		}
+	}
+	if opts.OutputReasoningPath != "" {
+		if dir := filepath.Dir(opts.OutputReasoningPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("failed to create reasoning output directory: %w", err)
+			}
 		}
 	}
 
@@ -296,13 +328,57 @@ func runRegenRejected(
 	rejectedModel config.ModelConfig,
 	opts Options,
 ) error {
-	jobs, err := buildDPOJobs(opts.InputPath)
-	if err != nil {
-		return err
-	}
-	if len(jobs) == 0 {
-		logger.Info("No DPO records found in input dataset", "input", opts.InputPath)
-		return nil
+	var (
+		jobs          []dpoJob
+		reasoningRecs []reasoningDPORecord
+		err           error
+	)
+
+	// If a reasoning dataset is provided, use it as the primary source of truth
+	// for prompts/chosen and for preserving rejected reasoning.
+	if opts.InputReasoningPath != "" {
+		reasoningRecs, err = loadReasoningDPO(opts.InputReasoningPath)
+		if err != nil {
+			return err
+		}
+		if len(reasoningRecs) == 0 {
+			logger.Info("No DPO records found in reasoning input dataset", "input_reasoning", opts.InputReasoningPath)
+			return nil
+		}
+
+		jobs = make([]dpoJob, len(reasoningRecs))
+		for i, rr := range reasoningRecs {
+			prompt := strings.TrimSpace(rr.Record.Prompt)
+			if prompt == "" {
+				return fmt.Errorf("line %d: DPO reasoning record is missing prompt field", rr.LineNumber)
+			}
+
+			chosen := rr.Record.Chosen
+			if util.ContainsThinkTags(chosen) {
+				// Drop reasoning from chosen when reconstructing the non-reasoning dataset
+				_, answer := util.SplitThinkAndAnswer(chosen)
+				if strings.TrimSpace(answer) != "" {
+					chosen = answer
+				}
+			}
+
+			jobs[i] = dpoJob{
+				ID:         i,
+				LineNumber: rr.LineNumber,
+				Prompt:     prompt,
+				Chosen:     chosen,
+			}
+		}
+	} else {
+		// Fallback: use non-reasoning dataset only
+		jobs, err = buildDPOJobs(opts.InputPath)
+		if err != nil {
+			return err
+		}
+		if len(jobs) == 0 {
+			logger.Info("No DPO records found in input dataset", "input", opts.InputPath)
+			return nil
+		}
 	}
 
 	cp, err := initTransformCheckpoint(opts, TransformRegenRejected, len(jobs))
@@ -314,27 +390,58 @@ func runRegenRejected(
 		return nil
 	}
 
-	// Open output file (append on resume, create otherwise).
+	// Open output files (append on resume, create otherwise).
 	var outputFile *os.File
-	if opts.Resume {
-		outputFile, err = os.OpenFile(opts.OutputPath, os.O_APPEND|os.O_WRONLY, 0o644)
-		if err != nil {
-			if os.IsNotExist(err) {
-				outputFile, err = os.Create(opts.OutputPath)
-			}
-			if err != nil {
-				return fmt.Errorf("failed to open output dataset for append: %w", err)
-			}
-		}
-	} else {
-		outputFile, err = os.Create(opts.OutputPath)
-		if err != nil {
-			return fmt.Errorf("failed to create output dataset: %w", err)
-		}
-	}
-	defer func() { _ = outputFile.Close() }()
+	var reasoningFile *os.File
 
-	encoder := json.NewEncoder(outputFile)
+	if opts.OutputPath != "" {
+		if opts.Resume {
+			outputFile, err = os.OpenFile(opts.OutputPath, os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				if os.IsNotExist(err) {
+					outputFile, err = os.Create(opts.OutputPath)
+				}
+				if err != nil {
+					return fmt.Errorf("failed to open output dataset for append: %w", err)
+				}
+			}
+		} else {
+			outputFile, err = os.Create(opts.OutputPath)
+			if err != nil {
+				return fmt.Errorf("failed to create output dataset: %w", err)
+			}
+		}
+		defer func() { _ = outputFile.Close() }()
+	}
+
+	if opts.OutputReasoningPath != "" {
+		if opts.Resume {
+			reasoningFile, err = os.OpenFile(opts.OutputReasoningPath, os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				if os.IsNotExist(err) {
+					reasoningFile, err = os.Create(opts.OutputReasoningPath)
+				}
+				if err != nil {
+					return fmt.Errorf("failed to open reasoning output dataset for append: %w", err)
+				}
+			}
+		} else {
+			reasoningFile, err = os.Create(opts.OutputReasoningPath)
+			if err != nil {
+				return fmt.Errorf("failed to create reasoning output dataset: %w", err)
+			}
+		}
+		defer func() { _ = reasoningFile.Close() }()
+	}
+
+	var encoder *json.Encoder
+	if outputFile != nil {
+		encoder = json.NewEncoder(outputFile)
+	}
+	var reasoningEncoder *json.Encoder
+	if reasoningFile != nil {
+		reasoningEncoder = json.NewEncoder(reasoningFile)
+	}
 	apiKey := secrets.GetAPIKey(rejectedModel.BaseURL)
 	if apiKey == "" && !isLocalEndpoint(rejectedModel.BaseURL) {
 		logger.Warn("No API key found for rejected model base URL", "base_url", rejectedModel.BaseURL)
@@ -409,14 +516,45 @@ func runRegenRejected(
 				break
 			}
 
-			record := models.DPORecord{
-				Prompt:   nextRes.Job.Prompt,
-				Chosen:   nextRes.Job.Chosen,
-				Rejected: nextRes.Rejected,
+			// Write non-reasoning dataset if requested
+			if encoder != nil {
+				record := models.DPORecord{
+					Prompt:   nextRes.Job.Prompt,
+					Chosen:   nextRes.Job.Chosen,
+					Rejected: nextRes.Rejected,
+				}
+				if err := encoder.Encode(&record); err != nil {
+					cancel()
+					return fmt.Errorf("failed to write updated DPO record for job %d (line %d): %w", nextRes.Job.ID, nextRes.Job.LineNumber, err)
+				}
 			}
-			if err := encoder.Encode(&record); err != nil {
-				cancel()
-				return fmt.Errorf("failed to write updated DPO record for job %d (line %d): %w", nextRes.Job.ID, nextRes.Job.LineNumber, err)
+
+			// Write reasoning dataset if requested
+			if reasoningEncoder != nil && len(reasoningRecs) > 0 {
+				if nextRes.Job.ID < 0 || nextRes.Job.ID >= len(reasoningRecs) {
+					cancel()
+					return fmt.Errorf("invalid reasoning record index %d for job %d", nextRes.Job.ID, nextRes.Job.ID)
+				}
+				base := reasoningRecs[nextRes.Job.ID].Record
+
+				// Preserve existing reasoning (if any) while updating the rejected content
+				combinedRejected := nextRes.Rejected
+				if base.Rejected != "" && util.ContainsThinkTags(base.Rejected) {
+					think, _ := util.SplitThinkAndAnswer(base.Rejected)
+					if strings.TrimSpace(think) != "" {
+						combinedRejected = util.CombineReasoningAndContent(think, nextRes.Rejected)
+					}
+				}
+
+				reasoningRecord := models.DPORecord{
+					Prompt:   base.Prompt,
+					Chosen:   base.Chosen,
+					Rejected: combinedRejected,
+				}
+				if err := reasoningEncoder.Encode(&reasoningRecord); err != nil {
+					cancel()
+					return fmt.Errorf("failed to write reasoning DPO record for job %d (line %d): %w", nextRes.Job.ID, nextRes.Job.LineNumber, err)
+				}
 			}
 
 			delete(pending, nextID)
@@ -531,6 +669,12 @@ type dpoResult struct {
 	Err      error
 }
 
+// reasoningDPORecord keeps the original reasoning-aware record and its source line number.
+type reasoningDPORecord struct {
+	Record     models.DPORecord
+	LineNumber int
+}
+
 // buildSFTJobs parses an input SFT JSONL file into a list of jobs.
 func buildSFTJobs(inputPath string, format models.SFTFormat) ([]sftJob, error) {
 	file, err := os.Open(inputPath)
@@ -627,6 +771,45 @@ func buildDPOJobs(inputPath string) ([]dpoJob, error) {
 	return jobs, nil
 }
 
+// loadReasoningDPO loads a reasoning-aware DPO dataset into memory.
+func loadReasoningDPO(inputPath string) ([]reasoningDPORecord, error) {
+	file, err := os.Open(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open reasoning input dataset: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+
+	var records []reasoningDPORecord
+	lineNum := 0
+
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var dpo models.DPORecord
+		if err := json.Unmarshal([]byte(line), &dpo); err != nil {
+			return nil, fmt.Errorf("line %d: failed to parse reasoning DPO record: %w", lineNum, err)
+		}
+
+		records = append(records, reasoningDPORecord{
+			Record:     dpo,
+			LineNumber: lineNum,
+		})
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed while reading reasoning input dataset: %w", err)
+	}
+
+	return records, nil
+}
+
 // generateRejected calls the rejected model using the configured rejected_generation template.
 func generateRejected(
 	ctx context.Context,
@@ -688,8 +871,10 @@ func initTransformCheckpoint(opts Options, mode TransformMode, totalJobs int) (*
 		if cp.Mode != mode {
 			return nil, fmt.Errorf("checkpoint mode mismatch: expected %s, got %s", mode, cp.Mode)
 		}
-		if cp.InputPath != opts.InputPath || cp.OutputPath != opts.OutputPath {
-			return nil, fmt.Errorf("checkpoint I/O mismatch: checkpoint was created for input=%s, output=%s", cp.InputPath, cp.OutputPath)
+		if cp.InputPath != opts.InputPath || cp.OutputPath != opts.OutputPath ||
+			cp.InputReasoningPath != opts.InputReasoningPath || cp.OutputReasoningPath != opts.OutputReasoningPath {
+			return nil, fmt.Errorf("checkpoint I/O mismatch: checkpoint was created for input=%s, output=%s, input_reasoning=%s, output_reasoning=%s",
+				cp.InputPath, cp.OutputPath, cp.InputReasoningPath, cp.OutputReasoningPath)
 		}
 		// If totalJobs changed (e.g. edited dataset), prefer the current scan but keep completed count bounded.
 		cp.TotalJobs = totalJobs
@@ -700,12 +885,14 @@ func initTransformCheckpoint(opts Options, mode TransformMode, totalJobs int) (*
 	}
 
 	cp := &transformCheckpoint{
-		Mode:          mode,
-		InputPath:     opts.InputPath,
-		OutputPath:    opts.OutputPath,
-		TotalJobs:     totalJobs,
-		CompletedJobs: 0,
-		LastUpdated:   time.Now(),
+		Mode:                mode,
+		InputPath:           opts.InputPath,
+		OutputPath:          opts.OutputPath,
+		InputReasoningPath:  opts.InputReasoningPath,
+		OutputReasoningPath: opts.OutputReasoningPath,
+		TotalJobs:           totalJobs,
+		CompletedJobs:       0,
+		LastUpdated:         time.Now(),
 	}
 	if err := saveTransformCheckpoint(opts.CheckpointPath, cp); err != nil {
 		return nil, err

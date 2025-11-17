@@ -34,11 +34,13 @@ var (
 	hfRepoID   string
 	verbose    bool
 
-	transformMode           string
-	transformInputPath      string
-	transformOutputPath     string
-	transformCheckpointPath string
-	transformResume         bool
+	transformMode               string
+	transformInputPath          string
+	transformOutputPath         string
+	transformCheckpointPath     string
+	transformResume             bool
+	transformInputReasoningPath string
+	transformOutputReasoningPath string
 )
 
 func main() {
@@ -123,14 +125,14 @@ Modes:
 	transformCmd.Flags().StringVar(&envFile, "env-file", ".env", "Path to environment file")
 	transformCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	transformCmd.Flags().StringVar(&transformMode, "mode", string(dataset.TransformSFTToDPO), "Transform mode: 'sft-to-dpo' or 'regen-rejected'")
-	transformCmd.Flags().StringVar(&transformInputPath, "input", "", "Path to input JSONL dataset")
-	transformCmd.Flags().StringVar(&transformOutputPath, "output", "", "Path to output JSONL dataset")
-	transformCmd.Flags().StringVar(&transformCheckpointPath, "checkpoint", "", "Path to transform checkpoint file (defaults to <output>.checkpoint.json)")
+	transformCmd.Flags().StringVar(&transformInputPath, "input", "", "Path to input JSONL dataset (non-reasoning)")
+	transformCmd.Flags().StringVar(&transformOutputPath, "output", "", "Path to output JSONL dataset (non-reasoning)")
+	transformCmd.Flags().StringVar(&transformCheckpointPath, "checkpoint", "", "Path to transform checkpoint file (defaults to derived from output paths)")
 	transformCmd.Flags().BoolVar(&transformResume, "resume", false, "Resume transform from an existing checkpoint")
+	transformCmd.Flags().StringVar(&transformInputReasoningPath, "input-reasoning", "", "Path to reasoning JSONL dataset input (optional)")
+	transformCmd.Flags().StringVar(&transformOutputReasoningPath, "output-reasoning", "", "Path to reasoning JSONL dataset output (optional)")
 
 	_ = transformCmd.MarkFlagRequired("mode")
-	_ = transformCmd.MarkFlagRequired("input")
-	_ = transformCmd.MarkFlagRequired("output")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(checkpointCmd)
@@ -338,12 +340,14 @@ func runTransform(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	opts := dataset.Options{
-		InputPath:          transformInputPath,
-		OutputPath:         transformOutputPath,
-		Concurrency:        cfg.Generation.Concurrency,
-		CheckpointPath:     transformCheckpointPath,
-		Resume:             transformResume,
-		CheckpointInterval: cfg.Generation.CheckpointInterval,
+		InputPath:           transformInputPath,
+		OutputPath:          transformOutputPath,
+		InputReasoningPath:  transformInputReasoningPath,
+		OutputReasoningPath: transformOutputReasoningPath,
+		Concurrency:         cfg.Generation.Concurrency,
+		CheckpointPath:      transformCheckpointPath,
+		Resume:              transformResume,
+		CheckpointInterval:  cfg.Generation.CheckpointInterval,
 	}
 
 	if err := dataset.Run(ctx, logger, mode, cfg, secrets, apiClient, opts); err != nil {

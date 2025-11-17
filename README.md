@@ -318,6 +318,23 @@ Graceful shutdown with Ctrl+C automatically saves checkpoint.
   --output path/to/dpo_dataset.regen.jsonl \
   --checkpoint path/to/transform.checkpoint.json \
   --resume
+
+# Regenerate both plain and reasoning DPO datasets
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode regen-rejected \
+  --input path/to/dpo_dataset.jsonl \
+  --input-reasoning path/to/dpo_dataset_reasoning.jsonl \
+  --output path/to/dpo_dataset.regen.jsonl \
+  --output-reasoning path/to/dpo_dataset_reasoning.regen.jsonl
+
+# Reasoning-only input: rebuild plain + reasoning datasets from reasoning JSONL
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode regen-rejected \
+  --input-reasoning path/to/dpo_dataset_reasoning.jsonl \
+  --output path/to/dpo_dataset_from_reasoning.jsonl \
+  --output-reasoning path/to/dpo_dataset_reasoning.regen.jsonl
 ```
 
 ### Other

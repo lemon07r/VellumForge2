@@ -50,6 +50,7 @@ REPORTS/
 *.toml
 !config.example.toml
 !cliff.toml
+!config.test.nahcrof.toml
 
 # Old .git files
 old.git.backup/
