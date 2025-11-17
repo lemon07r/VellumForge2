@@ -34,12 +34,12 @@ var (
 	hfRepoID   string
 	verbose    bool
 
-	transformMode               string
-	transformInputPath          string
-	transformOutputPath         string
-	transformCheckpointPath     string
-	transformResume             bool
-	transformInputReasoningPath string
+	transformMode                string
+	transformInputPath           string
+	transformOutputPath          string
+	transformCheckpointPath      string
+	transformResume              bool
+	transformInputReasoningPath  string
 	transformOutputReasoningPath string
 )
 

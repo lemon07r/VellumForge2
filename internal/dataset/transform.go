@@ -48,14 +48,14 @@ type Options struct {
 
 // transformCheckpoint tracks progress for long-running transforms so they can be resumed.
 type transformCheckpoint struct {
-	Mode          TransformMode `json:"mode"`
-	InputPath     string        `json:"input_path"`
-	OutputPath    string        `json:"output_path"`
-	InputReasoningPath  string `json:"input_reasoning_path,omitempty"`
-	OutputReasoningPath string `json:"output_reasoning_path,omitempty"`
-	TotalJobs     int           `json:"total_jobs"`
-	CompletedJobs int           `json:"completed_jobs"`
-	LastUpdated   time.Time     `json:"last_updated"`
+	Mode                TransformMode `json:"mode"`
+	InputPath           string        `json:"input_path"`
+	OutputPath          string        `json:"output_path"`
+	InputReasoningPath  string        `json:"input_reasoning_path,omitempty"`
+	OutputReasoningPath string        `json:"output_reasoning_path,omitempty"`
+	TotalJobs           int           `json:"total_jobs"`
+	CompletedJobs       int           `json:"completed_jobs"`
+	LastUpdated         time.Time     `json:"last_updated"`
 }
 
 // Run performs a dataset transformation using the provided config and API client.
