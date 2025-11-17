@@ -154,8 +154,12 @@ If the script doesn't work, you can run tests manually:
   --config tests/api-reliability-test/config.chutes.toml \
   --env-file tests/api-reliability-test/.env.chutes
 
-# Analyze results
+# Analyze results (auto-detect latest stress tests)
 python3 tests/api-reliability-test/analyze_results.py
+
+# Or analyze a specific session explicitly (recommended when debugging)
+# Replace SESSION_ID with the folder name under output/
+python3 tests/api-reliability-test/analyze_results.py output/SESSION_ID
 ```
 
 ---
@@ -491,8 +495,41 @@ EOF
 ### Automated Analysis
 
 ```bash
-# Run the provided analysis script
+# Default: auto-detect the most recent stress-test sessions (used by run_test.sh)
 python3 tests/api-reliability-test/analyze_results.py
+
+# Analyze one or more specific sessions (no auto-detection)
+python3 tests/api-reliability-test/analyze_results.py \
+  output/session_2025-11-17T13-14-06 \
+  output/session_2025-11-17T05-39-56
+
+# Limit auto-detection to N sessions and/or change base directory
+python3 tests/api-reliability-test/analyze_results.py --max-auto 4 --base-dir output
+```
+
+The script now writes a structured JSON file with all analyzed sessions:
+
+```json
+{
+  "sessions": [
+    {
+      "session_dir": "output/session_2025-11-17T13-14-06",
+      "provider": "nahcrof",
+      "total_records": 54,
+      "complete": 54,
+      "incomplete": 0,
+      "caught_incomplete": 202,
+      "caught_refusal": 0,
+      "caught_missing_finish": 0,
+      "log_total_prompts": 256,
+      "log_successful": 54,
+      "log_failed": 202,
+      "sample_incomplete": [
+        { "length": 60000, "ending": "..." }
+      ]
+    }
+  ]
+}
 ```
 
 ---
