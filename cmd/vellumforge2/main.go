@@ -15,6 +15,7 @@ import (
 	"github.com/lamim/vellumforge2/internal/api"
 	"github.com/lamim/vellumforge2/internal/checkpoint"
 	"github.com/lamim/vellumforge2/internal/config"
+	"github.com/lamim/vellumforge2/internal/dataset"
 	"github.com/lamim/vellumforge2/internal/hfhub"
 	"github.com/lamim/vellumforge2/internal/orchestrator"
 	"github.com/lamim/vellumforge2/internal/writer"
@@ -32,6 +33,10 @@ var (
 	uploadToHF bool
 	hfRepoID   string
 	verbose    bool
+
+	transformMode       string
+	transformInputPath  string
+	transformOutputPath string
 )
 
 func main() {
@@ -101,8 +106,31 @@ high-quality Direct Preference Optimization (DPO) datasets using LLMs.`,
 	checkpointCmd.AddCommand(inspectCmd)
 	checkpointCmd.AddCommand(resumeCmd)
 
+	transformCmd := &cobra.Command{
+		Use:   "transform",
+		Short: "Transform existing datasets (SFT→DPO, regenerate rejected responses)",
+		Long: `Transform existing JSONL datasets using the configured models.
+
+Modes:
+  - sft-to-dpo:       Convert an SFT dataset into a DPO dataset by generating rejected responses
+  - regen-rejected:   Regenerate rejected responses for an existing DPO dataset`,
+		RunE: runTransform,
+	}
+
+	transformCmd.Flags().StringVar(&configPath, "config", "config.toml", "Path to configuration file")
+	transformCmd.Flags().StringVar(&envFile, "env-file", ".env", "Path to environment file")
+	transformCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
+	transformCmd.Flags().StringVar(&transformMode, "mode", string(dataset.TransformSFTToDPO), "Transform mode: 'sft-to-dpo' or 'regen-rejected'")
+	transformCmd.Flags().StringVar(&transformInputPath, "input", "", "Path to input JSONL dataset")
+	transformCmd.Flags().StringVar(&transformOutputPath, "output", "", "Path to output JSONL dataset")
+
+	_ = transformCmd.MarkFlagRequired("mode")
+	_ = transformCmd.MarkFlagRequired("input")
+	_ = transformCmd.MarkFlagRequired("output")
+
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(checkpointCmd)
+	rootCmd.AddCommand(transformCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -253,6 +281,72 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.Info("All done! 🎉")
+	return nil
+}
+
+// runTransform performs offline dataset transforms using existing config.toml settings.
+func runTransform(cmd *cobra.Command, args []string) error {
+	// Load environment variables from file if it exists
+	if envFile != "" {
+		if err := loadEnvFile(envFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load env file: %v\n", err)
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Loaded env file: %s\n", envFile)
+		}
+	}
+
+	// Load configuration
+	cfg, secrets, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Determine log level
+	logLevel := slog.LevelInfo
+	if verbose {
+		logLevel = slog.LevelDebug
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+
+	// Create API client
+	apiClient := api.NewClient(logger)
+
+	// Set provider-level rate limits if configured
+	if len(cfg.ProviderRateLimits) > 0 {
+		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits, cfg.ProviderBurstPercent)
+		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits, "burst_percent", cfg.ProviderBurstPercent)
+	}
+
+	// Parse transform mode
+	var mode dataset.TransformMode
+	switch strings.ToLower(strings.TrimSpace(transformMode)) {
+	case string(dataset.TransformSFTToDPO):
+		mode = dataset.TransformSFTToDPO
+	case string(dataset.TransformRegenRejected), "regen":
+		mode = dataset.TransformRegenRejected
+	default:
+		return fmt.Errorf("invalid transform mode: %s (valid: '%s', '%s')",
+			transformMode, dataset.TransformSFTToDPO, dataset.TransformRegenRejected)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	opts := dataset.Options{
+		InputPath:  transformInputPath,
+		OutputPath: transformOutputPath,
+		Concurrency: cfg.Generation.Concurrency,
+	}
+
+	if err := dataset.Run(ctx, logger, mode, cfg, secrets, apiClient, opts); err != nil {
+		if err == context.Canceled {
+			return fmt.Errorf("transform interrupted")
+		}
+		return err
+	}
+
+	logger.Info("Dataset transform complete")
 	return nil
 }
 
