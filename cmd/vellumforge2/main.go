@@ -34,9 +34,11 @@ var (
 	hfRepoID   string
 	verbose    bool
 
-	transformMode       string
-	transformInputPath  string
-	transformOutputPath string
+	transformMode           string
+	transformInputPath      string
+	transformOutputPath     string
+	transformCheckpointPath string
+	transformResume         bool
 )
 
 func main() {
@@ -123,6 +125,8 @@ Modes:
 	transformCmd.Flags().StringVar(&transformMode, "mode", string(dataset.TransformSFTToDPO), "Transform mode: 'sft-to-dpo' or 'regen-rejected'")
 	transformCmd.Flags().StringVar(&transformInputPath, "input", "", "Path to input JSONL dataset")
 	transformCmd.Flags().StringVar(&transformOutputPath, "output", "", "Path to output JSONL dataset")
+	transformCmd.Flags().StringVar(&transformCheckpointPath, "checkpoint", "", "Path to transform checkpoint file (defaults to <output>.checkpoint.json)")
+	transformCmd.Flags().BoolVar(&transformResume, "resume", false, "Resume transform from an existing checkpoint")
 
 	_ = transformCmd.MarkFlagRequired("mode")
 	_ = transformCmd.MarkFlagRequired("input")
@@ -334,9 +338,12 @@ func runTransform(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	opts := dataset.Options{
-		InputPath:  transformInputPath,
-		OutputPath: transformOutputPath,
-		Concurrency: cfg.Generation.Concurrency,
+		InputPath:          transformInputPath,
+		OutputPath:         transformOutputPath,
+		Concurrency:        cfg.Generation.Concurrency,
+		CheckpointPath:     transformCheckpointPath,
+		Resume:             transformResume,
+		CheckpointInterval: cfg.Generation.CheckpointInterval,
 	}
 
 	if err := dataset.Run(ctx, logger, mode, cfg, secrets, apiClient, opts); err != nil {

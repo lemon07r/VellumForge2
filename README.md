@@ -293,6 +293,33 @@ Graceful shutdown with Ctrl+C automatically saves checkpoint.
 ./bin/vellumforge2 checkpoint resume <session-dir> --config config.sft.toml --env-file .env
 ```
 
+### Dataset Transform (SFT→DPO & Rejected Regeneration)
+
+```bash
+# Convert an existing SFT dataset into DPO (generates rejected responses)
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode sft-to-dpo \
+  --input path/to/sft_dataset.jsonl \
+  --output path/to/dpo_from_sft.jsonl
+
+# Regenerate rejected responses for an existing DPO dataset
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode regen-rejected \
+  --input path/to/dpo_dataset.jsonl \
+  --output path/to/dpo_dataset.regen.jsonl
+
+# Optional: checkpoint/resume for long transforms
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode regen-rejected \
+  --input path/to/dpo_dataset.jsonl \
+  --output path/to/dpo_dataset.regen.jsonl \
+  --checkpoint path/to/transform.checkpoint.json \
+  --resume
+```
+
 ### Other
 
 ```bash
