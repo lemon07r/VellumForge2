@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/schollz/progressbar/v3"
+
 	"github.com/lamim/vellumforge2/internal/api"
 	"github.com/lamim/vellumforge2/internal/config"
 	"github.com/lamim/vellumforge2/internal/util"
@@ -181,6 +183,14 @@ func runSFTToDPO(
 		return nil
 	}
 
+	bar := progressbar.Default(int64(cp.TotalJobs), "Transforming SFT→DPO")
+	if cp.CompletedJobs > 0 {
+		if cp.CompletedJobs > cp.TotalJobs {
+			cp.CompletedJobs = cp.TotalJobs
+		}
+		_ = bar.Add(cp.CompletedJobs)
+	}
+
 	// Open output file (append on resume, create otherwise).
 	var outputFile *os.File
 	if opts.Resume {
@@ -290,6 +300,7 @@ func runSFTToDPO(
 			nextID++
 			cp.CompletedJobs++
 			cp.LastUpdated = time.Now()
+			_ = bar.Add(1)
 
 			if opts.CheckpointInterval > 0 && cp.CompletedJobs%opts.CheckpointInterval == 0 {
 				if err := saveTransformCheckpoint(opts.CheckpointPath, cp); err != nil {
@@ -388,6 +399,14 @@ func runRegenRejected(
 	if cp.CompletedJobs >= cp.TotalJobs {
 		logger.Info("Transform already complete", "input", opts.InputPath, "output", opts.OutputPath)
 		return nil
+	}
+
+	bar := progressbar.Default(int64(cp.TotalJobs), "Regenerating rejected")
+	if cp.CompletedJobs > 0 {
+		if cp.CompletedJobs > cp.TotalJobs {
+			cp.CompletedJobs = cp.TotalJobs
+		}
+		_ = bar.Add(cp.CompletedJobs)
 	}
 
 	// Open output files (append on resume, create otherwise).
@@ -561,6 +580,7 @@ func runRegenRejected(
 			nextID++
 			cp.CompletedJobs++
 			cp.LastUpdated = time.Now()
+			_ = bar.Add(1)
 
 			if opts.CheckpointInterval > 0 && cp.CompletedJobs%opts.CheckpointInterval == 0 {
 				if err := saveTransformCheckpoint(opts.CheckpointPath, cp); err != nil {
@@ -856,6 +876,10 @@ func generateRejected(
 	content := strings.TrimSpace(resp.Choices[0].Message.Content)
 	if content == "" {
 		return "", fmt.Errorf("empty content returned from rejected model")
+	}
+	cleaned := util.CleanMetaFromLLMResponse(content)
+	if cleaned != "" {
+		content = cleaned
 	}
 
 	return content, nil
