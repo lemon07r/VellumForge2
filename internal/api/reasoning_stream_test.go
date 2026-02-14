@@ -79,6 +79,7 @@ func TestStreamingForReasoning(t *testing.T) {
 
 	// Read streaming response
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	chunkCount := 0
 	hasReasoningContent := false
 	var reasoningContent strings.Builder

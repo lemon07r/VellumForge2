@@ -112,20 +112,16 @@ func (c *Client) ChatCompletion(
 ) (*ChatCompletionResponse, error) {
 	requestStart := time.Now()
 
-	// Apply per-model HTTP timeout
-	// HTTPTimeoutSeconds should always be set (config loader defaults to 120s)
-	// For long-form generation, increase this value in config
-	var cancel context.CancelFunc
-	timeout := time.Duration(modelCfg.HTTPTimeoutSeconds) * time.Second
-	if timeout == 0 {
-		// Fallback to default if somehow not set
-		timeout = DefaultHTTPTimeout
+	// Compute per-attempt HTTP timeout (applied inside the retry loop, not here).
+	// HTTPTimeoutSeconds should always be set (config loader defaults to 120s).
+	// For long-form generation, increase this value in config.
+	httpTimeout := time.Duration(modelCfg.HTTPTimeoutSeconds) * time.Second
+	if httpTimeout == 0 {
+		httpTimeout = DefaultHTTPTimeout
 		c.logger.Warn("Model has no timeout configured, using default",
 			"model", modelCfg.ModelName,
-			"timeout", timeout)
+			"timeout", httpTimeout)
 	}
-	ctx, cancel = context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	// Generate a unique model ID for rate limiting
 	modelID := fmt.Sprintf("%s:%s", modelCfg.BaseURL, modelCfg.ModelName)
@@ -207,7 +203,9 @@ func (c *Client) ChatCompletion(
 			}
 		}
 
-		resp, err := c.doRequest(ctx, modelCfg.BaseURL, apiKey, req)
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, httpTimeout)
+		resp, err := c.doRequest(attemptCtx, modelCfg.BaseURL, apiKey, req)
+		attemptCancel()
 		if err == nil {
 			apiCallDuration := time.Since(apiCallStart)
 			totalDuration := time.Since(requestStart)

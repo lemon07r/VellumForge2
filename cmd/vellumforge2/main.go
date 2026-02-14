@@ -124,7 +124,7 @@ Modes:
 	transformCmd.Flags().StringVar(&configPath, "config", "config.toml", "Path to configuration file")
 	transformCmd.Flags().StringVar(&envFile, "env-file", ".env", "Path to environment file")
 	transformCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
-	transformCmd.Flags().StringVar(&transformMode, "mode", string(dataset.TransformSFTToDPO), "Transform mode: 'sft-to-dpo' or 'regen-rejected'")
+	transformCmd.Flags().StringVar(&transformMode, "mode", "", "Transform mode: 'sft-to-dpo' or 'regen-rejected'")
 	transformCmd.Flags().StringVar(&transformInputPath, "input", "", "Path to input JSONL dataset (non-reasoning)")
 	transformCmd.Flags().StringVar(&transformOutputPath, "output", "", "Path to output JSONL dataset (non-reasoning)")
 	transformCmd.Flags().StringVar(&transformCheckpointPath, "checkpoint", "", "Path to transform checkpoint file (defaults to derived from output paths)")

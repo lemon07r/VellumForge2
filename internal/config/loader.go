@@ -100,6 +100,8 @@ func applyDefaults(cfg *Config) {
 		}
 		// Default HTTP timeout: 120 seconds
 		// For very long-form generation (>4000 tokens), set this higher (e.g., 600-1200)
+		// NOTE: HTTPTimeoutSeconds == 0 means "not set" (TOML can't distinguish 0 from unset).
+		// To effectively disable timeouts, use a very large value instead.
 		if model.HTTPTimeoutSeconds == 0 {
 			model.HTTPTimeoutSeconds = 120 // 2 minutes default
 		}

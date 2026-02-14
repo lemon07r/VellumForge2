@@ -250,6 +250,8 @@ func (c *Client) doStreamingRequest(
 	var finishReason string
 
 	scanner := bufio.NewScanner(httpResp.Body)
+	// Increase scanner buffer to handle large SSE data: lines from some providers
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 

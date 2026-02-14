@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 # API Reliability Stress Test Runner
 # Tests streaming reliability under load for different API providers

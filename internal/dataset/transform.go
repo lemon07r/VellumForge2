@@ -196,12 +196,7 @@ func runSFTToDPO(
 	if opts.Resume {
 		outputFile, err = os.OpenFile(opts.OutputPath, os.O_APPEND|os.O_WRONLY, 0o644)
 		if err != nil {
-			if os.IsNotExist(err) {
-				outputFile, err = os.Create(opts.OutputPath)
-			}
-			if err != nil {
-				return fmt.Errorf("failed to open output dataset for append: %w", err)
-			}
+			return fmt.Errorf("failed to open output dataset for resume (file must exist): %w", err)
 		}
 	} else {
 		outputFile, err = os.Create(opts.OutputPath)
@@ -310,13 +305,13 @@ func runSFTToDPO(
 		}
 	}
 
-	if err := parentCtx.Err(); err != nil && err != context.Canceled {
-		return err
-	}
-
 	// Final checkpoint save
 	if err := saveTransformCheckpoint(opts.CheckpointPath, cp); err != nil {
 		logger.Warn("Failed to save final transform checkpoint", "error", err)
+	}
+
+	if err := parentCtx.Err(); err != nil {
+		return err
 	}
 
 	logger.Info("SFT→DPO transform completed",
@@ -417,12 +412,7 @@ func runRegenRejected(
 		if opts.Resume {
 			outputFile, err = os.OpenFile(opts.OutputPath, os.O_APPEND|os.O_WRONLY, 0o644)
 			if err != nil {
-				if os.IsNotExist(err) {
-					outputFile, err = os.Create(opts.OutputPath)
-				}
-				if err != nil {
-					return fmt.Errorf("failed to open output dataset for append: %w", err)
-				}
+				return fmt.Errorf("failed to open output dataset for resume (file must exist): %w", err)
 			}
 		} else {
 			outputFile, err = os.Create(opts.OutputPath)
@@ -437,12 +427,7 @@ func runRegenRejected(
 		if opts.Resume {
 			reasoningFile, err = os.OpenFile(opts.OutputReasoningPath, os.O_APPEND|os.O_WRONLY, 0o644)
 			if err != nil {
-				if os.IsNotExist(err) {
-					reasoningFile, err = os.Create(opts.OutputReasoningPath)
-				}
-				if err != nil {
-					return fmt.Errorf("failed to open reasoning output dataset for append: %w", err)
-				}
+				return fmt.Errorf("failed to open reasoning output dataset for resume (file must exist): %w", err)
 			}
 		} else {
 			reasoningFile, err = os.Create(opts.OutputReasoningPath)
@@ -590,13 +575,13 @@ func runRegenRejected(
 		}
 	}
 
-	if err := parentCtx.Err(); err != nil && err != context.Canceled {
-		return err
-	}
-
 	// Final checkpoint save
 	if err := saveTransformCheckpoint(opts.CheckpointPath, cp); err != nil {
 		logger.Warn("Failed to save final transform checkpoint", "error", err)
+	}
+
+	if err := parentCtx.Err(); err != nil {
+		return err
 	}
 
 	logger.Info("DPO rejected regeneration completed",

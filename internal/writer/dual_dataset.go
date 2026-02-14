@@ -261,9 +261,13 @@ func (dw *DualDatasetWriter) Flush() error {
 	return nil
 }
 
-// Close closes both dataset files
+// Close flushes any buffered records and closes both dataset files.
 func (dw *DualDatasetWriter) Close() error {
 	var errs []error
+
+	if err := dw.Flush(); err != nil {
+		errs = append(errs, fmt.Errorf("flush buffered records: %w", err))
+	}
 
 	if err := dw.regularFile.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("regular dataset: %w", err))

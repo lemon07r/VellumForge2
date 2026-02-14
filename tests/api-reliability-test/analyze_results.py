@@ -7,7 +7,6 @@ import argparse
 import json
 import os
 import glob
-from pathlib import Path
 
 def analyze_session(session_dir):
     """Analyze a single test session"""
@@ -59,7 +58,7 @@ def analyze_session(session_dir):
                                 'length': len(output_text),
                                 'ending': output_text[-60:]
                             })
-                except:
+                except (json.JSONDecodeError, KeyError, TypeError):
                     pass
     
     # Analyze logs
@@ -83,7 +82,7 @@ def analyze_session(session_dir):
                         analysis['log_total_prompts'] = entry.get('total_prompts', 0)
                         analysis['log_successful'] = entry.get('successful', 0)
                         analysis['log_failed'] = entry.get('failed', 0)
-                except:
+                except (json.JSONDecodeError, KeyError, TypeError):
                     pass
     
     return analysis
