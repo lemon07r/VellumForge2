@@ -59,20 +59,20 @@ build-all: build-linux build-darwin build-windows
 test:
 	$(call print_step,"Running unit tests - skips integration tests...")
 	@go test -short -race -coverprofile=coverage.out ./...
-	@printf "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)\n"
+	@printf "$(COLOR_GREEN)Total coverage: %s$(COLOR_RESET)\n" "$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')"
 	$(call print_step,"✓ Tests passed")
 
 test-integration:
 	$(call print_step,"Running ALL tests including integration tests - makes real API calls...")
 	@go test -race -coverprofile=coverage.out ./...
-	@printf "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)\n"
+	@printf "$(COLOR_GREEN)Total coverage: %s$(COLOR_RESET)\n" "$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')"
 	$(call print_step,"✓ All tests passed")
 
 test-coverage:
 	$(call print_step,"Running ALL tests with coverage report - makes real API calls...")
 	@go test -race -coverprofile=coverage.out ./...
 	@go tool cover -html=coverage.out -o coverage.html
-	@printf "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)\n"
+	@printf "$(COLOR_GREEN)Total coverage: %s$(COLOR_RESET)\n" "$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')"
 	$(call print_step,"✓ Coverage report generated: coverage.html")
 
 test-short:
