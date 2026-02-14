@@ -252,6 +252,11 @@ Resume interrupted session:
 
 # Resume generation
 ./bin/vellumforge2 checkpoint resume session_2025-11-05T12-34-56
+
+# Resume with specific config and env file
+./bin/vellumforge2 checkpoint resume session_2025-11-05T12-34-56 \
+  --config config.sft.toml \
+  --env-file .env
 ```
 
 Graceful shutdown with Ctrl+C automatically saves checkpoint.
@@ -283,6 +288,53 @@ Graceful shutdown with Ctrl+C automatically saves checkpoint.
 
 # Resume from checkpoint
 ./bin/vellumforge2 checkpoint resume <session-dir>
+
+# Resume with specific config (important if checkpoint used different config file)
+./bin/vellumforge2 checkpoint resume <session-dir> --config config.sft.toml --env-file .env
+```
+
+### Dataset Transform (SFT→DPO & Rejected Regeneration)
+
+```bash
+# Convert an existing SFT dataset into DPO (generates rejected responses)
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode sft-to-dpo \
+  --input path/to/sft_dataset.jsonl \
+  --output path/to/dpo_from_sft.jsonl
+
+# Regenerate rejected responses for an existing DPO dataset
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode regen-rejected \
+  --input path/to/dpo_dataset.jsonl \
+  --output path/to/dpo_dataset.regen.jsonl
+
+# Optional: checkpoint/resume for long transforms
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode regen-rejected \
+  --input path/to/dpo_dataset.jsonl \
+  --output path/to/dpo_dataset.regen.jsonl \
+  --checkpoint path/to/transform.checkpoint.json \
+  --resume
+
+# Regenerate both plain and reasoning DPO datasets
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode regen-rejected \
+  --input path/to/dpo_dataset.jsonl \
+  --input-reasoning path/to/dpo_dataset_reasoning.jsonl \
+  --output path/to/dpo_dataset.regen.jsonl \
+  --output-reasoning path/to/dpo_dataset_reasoning.regen.jsonl
+
+# Reasoning-only input: rebuild plain + reasoning datasets from reasoning JSONL
+./bin/vellumforge2 transform \
+  --config config.dpo.toml \
+  --mode regen-rejected \
+  --input-reasoning path/to/dpo_dataset_reasoning.jsonl \
+  --output path/to/dpo_dataset_from_reasoning.jsonl \
+  --output-reasoning path/to/dpo_dataset_reasoning.regen.jsonl
 ```
 
 ### Other
@@ -367,6 +419,30 @@ base_url = "https://integrate.api.nvidia.com/v1"
 model_name = "meta/llama-3.1-8b-instruct"  # Smaller model
 ```
 
+### Request Timeout Errors for Long-Form Generation
+
+For long responses (>4000 words or >16k tokens), increase HTTP timeout:
+
+```toml
+[models.main]
+http_timeout_seconds = 900  # 15 minutes (default: 120)
+# For very long-form (32k+ tokens):
+# http_timeout_seconds = 1800  # 30 minutes
+```
+
+Typical generation times:
+- 4k tokens: ~1-2 minutes
+- 16k tokens: ~3-5 minutes
+- 32k tokens: ~5-10+ minutes
+
+Also increase retry settings for stability:
+
+```toml
+[models.main]
+max_retries = 8              # More retries for long requests (default: 3)
+max_backoff_seconds = 300    # Longer backoff cap (default: 120)
+```
+
 See [GETTING_STARTED.md](GETTING_STARTED.md) for more troubleshooting.
 
 ## Documentation
@@ -406,7 +482,7 @@ MIT License - see [LICENSE](LICENSE) file.
   author = {Lamim},
   year = {2025},
   url = {https://github.com/lemon07r/vellumforge2},
-  version = {1.5.3}
+  version = {1.6.0}
 }
 ```
 
@@ -423,5 +499,5 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
-Current Version: v1.5.3
+Current Version: v1.6.0
 Last Updated: 2025-11-06

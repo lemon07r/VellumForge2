@@ -29,21 +29,24 @@ type Config struct {
 
 // GenerationConfig holds generation-specific settings
 type GenerationConfig struct {
-	MainTopic               string             `toml:"main_topic"`
-	NumSubtopics            int                `toml:"num_subtopics"`
-	SubtopicChunkSize       int                `toml:"subtopic_chunk_size"` // Request subtopics in chunks (0=all at once, default: 30)
-	NumPromptsPerSubtopic   int                `toml:"num_prompts_per_subtopic"`
-	Concurrency             int                `toml:"concurrency"`
-	OverGenerationBuffer    float64            `toml:"over_generation_buffer"`    // Buffer percentage (0.0-1.0, default 0.15)
-	MaxExclusionListSize    int                `toml:"max_exclusion_list_size"`   // Max items in exclusion list (default 50)
-	MinSuccessRate          float64            `toml:"min_success_rate"`          // Minimum success rate for prompt generation (0.0-1.0, default 0.90)
-	PromptRetryAttempts     int                `toml:"prompt_retry_attempts"`     // Number of retry attempts for failed subtopics (default 2)
-	DisableValidationLimits bool               `toml:"disable_validation_limits"` // Disable upper bound validation (use with caution)
-	EnableCheckpointing     bool               `toml:"enable_checkpointing"`      // Enable checkpoint/resume support
-	CheckpointInterval      int                `toml:"checkpoint_interval"`       // Save checkpoint every N completed jobs (default: 10)
-	ResumeFromSession       string             `toml:"resume_from_session"`       // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
-	DatasetMode             models.DatasetMode `toml:"dataset_mode"`              // Dataset format: sft, dpo, kto, mo-dpo (default: mo-dpo)
-	IncludeTopicColumns     bool               `toml:"include_topic_columns"`     // For SFT mode: include main_topic/sub_topic columns (default: true)
+	MainTopic                string             `toml:"main_topic"`
+	NumSubtopics             int                `toml:"num_subtopics"`
+	SubtopicChunkSize        int                `toml:"subtopic_chunk_size"` // Request subtopics in chunks (0=all at once, default: 30)
+	NumPromptsPerSubtopic    int                `toml:"num_prompts_per_subtopic"`
+	Concurrency              int                `toml:"concurrency"`
+	OverGenerationBuffer     float64            `toml:"over_generation_buffer"`     // Buffer percentage (0.0-1.0, default 0.15)
+	MaxExclusionListSize     int                `toml:"max_exclusion_list_size"`    // Max items in exclusion list (default 50)
+	MinSuccessRate           float64            `toml:"min_success_rate"`           // Minimum success rate for prompt generation (0.0-1.0, default 0.90)
+	PromptRetryAttempts      int                `toml:"prompt_retry_attempts"`      // Number of retry attempts for failed subtopics (default 2)
+	DisableValidationLimits  bool               `toml:"disable_validation_limits"`  // Disable upper bound validation (use with caution)
+	EnableCheckpointing      bool               `toml:"enable_checkpointing"`       // Enable checkpoint/resume support
+	CheckpointInterval       int                `toml:"checkpoint_interval"`        // Save checkpoint every N completed jobs (default: 10)
+	ResumeFromSession        string             `toml:"resume_from_session"`        // Session directory to resume from (e.g., "session_2025-10-27T12-34-56")
+	DatasetMode              models.DatasetMode `toml:"dataset_mode"`               // Dataset format: sft, dpo, kto, mo-dpo (default: mo-dpo)
+	SFTFormat                models.SFTFormat   `toml:"sft_format"`                 // SFT output format (alpaca/sharegpt)
+	IncludeTopicColumns      bool               `toml:"include_topic_columns"`      // For SFT mode: include main_topic/sub_topic columns (default: true)
+	EnableReasoningCapture   bool               `toml:"enable_reasoning_capture"`   // Capture reasoning from reasoning models (creates dual datasets)
+	ReasoningCaptureRejected bool               `toml:"reasoning_capture_rejected"` // Also capture reasoning for rejected responses (default: false)
 }
 
 // ModelConfig represents configuration for a single model endpoint
@@ -58,8 +61,10 @@ type ModelConfig struct {
 	RateLimitPerMinute   int     `toml:"rate_limit_per_minute"`
 	MaxBackoffSeconds    int     `toml:"max_backoff_seconds"`             // Optional: max backoff duration (default 120)
 	MaxRetries           int     `toml:"max_retries"`                     // Optional: max retry attempts (default 3, 0 = unlimited)
+	HTTPTimeoutSeconds   int     `toml:"http_timeout_seconds"`            // Optional: HTTP request timeout (default 120, 0 = no timeout)
 	JudgeTimeoutSeconds  int     `toml:"judge_timeout_seconds,omitempty"` // Timeout for judge API calls (default: 100s)
 	UseJSONMode          bool    `toml:"use_json_mode"`                   // Enable structured JSON output mode (optional)
+	UseStreaming         bool    `toml:"use_streaming"`                   // Enable streaming mode (bypasses gateway timeouts, default: false)
 	Enabled              bool    `toml:"enabled"`                         // Only used for judge model
 }
 
@@ -123,6 +128,18 @@ func (c *Config) Validate() error {
 	}
 	if !validMode {
 		return fmt.Errorf("generation.dataset_mode must be one of: sft, dpo, kto, mo-dpo (got %s)", c.Generation.DatasetMode)
+	}
+
+	// Validate SFT format selection
+	if c.Generation.DatasetMode == models.DatasetModeSFT {
+		switch c.Generation.SFTFormat {
+		case "", models.SFTFormatAlpaca, models.SFTFormatShareGPT:
+			if c.Generation.SFTFormat == "" {
+				c.Generation.SFTFormat = models.SFTFormatShareGPT
+			}
+		default:
+			return fmt.Errorf("generation.sft_format must be 'alpaca' or 'sharegpt' (got %s)", c.Generation.SFTFormat)
+		}
 	}
 
 	// Validate generation config
@@ -308,6 +325,12 @@ func LoadSecrets() (*Secrets, error) {
 	if key := os.Getenv("TOGETHER_API_KEY"); key != "" {
 		secrets.APIKeys["together"] = key
 	}
+	if key := os.Getenv("CHUTES_API_KEY"); key != "" {
+		secrets.APIKeys["chutes"] = key
+	}
+	if key := os.Getenv("NAHCROF_API_KEY"); key != "" {
+		secrets.APIKeys["nahcrof"] = key
+	}
 
 	// Load Hugging Face token
 	secrets.HuggingFaceToken = os.Getenv("HUGGING_FACE_TOKEN")
@@ -338,6 +361,16 @@ func (s *Secrets) GetAPIKey(baseURL string) string {
 			return key
 		}
 	}
+	if contains(baseURL, "llm.chutes.ai") {
+		if key := s.APIKeys["chutes"]; key != "" {
+			return key
+		}
+	}
+	if contains(baseURL, "ai.nahcrof.com") {
+		if key := s.APIKeys["nahcrof"]; key != "" {
+			return key
+		}
+	}
 
 	// Fall back to generic API_KEY for any OpenAI-compatible provider
 	if key := s.APIKeys["generic"]; key != "" {
@@ -362,6 +395,12 @@ func GetProviderName(baseURL string) string {
 	}
 	if contains(baseURL, "together.xyz") || contains(baseURL, "together.ai") {
 		return "together"
+	}
+	if contains(baseURL, "llm.chutes.ai") {
+		return "chutes"
+	}
+	if contains(baseURL, "ai.nahcrof.com") {
+		return "nahcrof"
 	}
 	// For localhost or unknown providers, use the full base URL as provider name
 	return baseURL

@@ -51,7 +51,8 @@ type Client struct {
 func NewClient(logger *slog.Logger) *Client {
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: DefaultHTTPTimeout,
+			// No timeout here - we use context timeouts instead for per-model control
+			Timeout: 0,
 		},
 		rateLimiterPool:    NewRateLimiterPool(),
 		logger:             logger,
@@ -110,6 +111,17 @@ func (c *Client) ChatCompletion(
 	messages []Message,
 ) (*ChatCompletionResponse, error) {
 	requestStart := time.Now()
+
+	// Compute per-attempt HTTP timeout (applied inside the retry loop, not here).
+	// HTTPTimeoutSeconds should always be set (config loader defaults to 120s).
+	// For long-form generation, increase this value in config.
+	httpTimeout := time.Duration(modelCfg.HTTPTimeoutSeconds) * time.Second
+	if httpTimeout == 0 {
+		httpTimeout = DefaultHTTPTimeout
+		c.logger.Warn("Model has no timeout configured, using default",
+			"model", modelCfg.ModelName,
+			"timeout", httpTimeout)
+	}
 
 	// Generate a unique model ID for rate limiting
 	modelID := fmt.Sprintf("%s:%s", modelCfg.BaseURL, modelCfg.ModelName)
@@ -191,7 +203,9 @@ func (c *Client) ChatCompletion(
 			}
 		}
 
-		resp, err := c.doRequest(ctx, modelCfg.BaseURL, apiKey, req)
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, httpTimeout)
+		resp, err := c.doRequest(attemptCtx, modelCfg.BaseURL, apiKey, req)
+		attemptCancel()
 		if err == nil {
 			apiCallDuration := time.Since(apiCallStart)
 			totalDuration := time.Since(requestStart)

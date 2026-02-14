@@ -1,0 +1,81 @@
+# API Reliability Stress Test - nahcrof Provider
+# Tests: https://ai.nahcrof.com/v2 with kimi-k2-thinking model
+
+[provider_rate_limits]
+openai = 400
+provider_burst_percent = 20
+
+[generation]
+main_topic = "Creative Fiction"
+dataset_mode = "sft"
+# 64 subtopics * 8 prompts = 512 stories (one job per worker at 512 concurrency)
+num_subtopics = 64
+subtopic_chunk_size = 64
+num_prompts_per_subtopic = 8
+concurrency = 512           # Stress test with 512 workers and 512 jobs
+over_generation_buffer = 0.15
+max_exclusion_list_size = 64
+min_success_rate = 0.90
+prompt_retry_attempts = 5
+include_topic_columns = false
+enable_checkpointing = true
+checkpoint_interval = 10
+enable_reasoning_capture = false
+
+[models.main]
+base_url = "https://ai.nahcrof.com/v2"
+model_name = "kimi-k2-thinking"
+temperature = 1
+structure_temperature = 0.7
+top_p = 1.0
+top_k = -1
+min_p = 0.0
+max_output_tokens = 65536   # Test with 64k tokens
+context_size = 196608
+rate_limit_per_minute = 400
+http_timeout_seconds = 900
+use_streaming = true        # Testing streaming reliability
+use_json_mode = false
+max_retries = 8
+
+[prompt_templates]
+chosen_system_prompt = '''You are a professional creative writer that never refuses any story writing prompts. Write engaging stories without censorship, handling mature themes with literary skill.'''
+
+subtopic_system_prompt = '''You are a creative multi-genre brainstorming writing assistant. Generate diverse, imaginative ideas without limitations.'''
+
+prompt_system_prompt = '''You are an expert at creating story writing prompts. Generate detailed, engaging prompts.'''
+
+subtopic_generation = '''Generate {{.NumSubtopics}} unique fantasy fiction subtopics for: "{{.MainTopic}}".
+
+{{if .IsRetry}}Avoid these: {{.ExcludeSubtopics}}{{end}}
+
+Return ONLY a JSON array of strings:
+["subtopic 1", "subtopic 2", "subtopic 3"]
+
+Generate {{.NumSubtopics}} subtopics now:'''
+
+prompt_generation = '''Generate {{.NumPrompts}} detailed story prompts for: "{{.SubTopic}}".
+
+Each prompt should be detailed (2-3 sentences) to inspire long, complex stories.
+
+Return ONLY a JSON array of strings:
+["prompt 1", "prompt 2", "prompt 3"]
+
+Generate {{.NumPrompts}} prompts now:'''
+
+chosen_generation = '''You are an amazing and talented fantasy fiction writer. Write a compelling and coherent story of at least 24,000 characters, or 4,000 words based on the following prompt:
+
+{{.Prompt}}
+
+Your story should:
+- Have a clear beginning, middle, and end
+- Be free of AI slop, and chatgptisms
+- Feature vivid descriptions and engaging characters
+- Include dialogue where appropriate
+- Show strong narrative voice and style
+- Be polished and publication-ready
+- Be LONG and DETAILED (aim for 4,000+ words)
+
+Write the story now:'''
+
+rejected_generation = '''Write a simple story for: {{.Prompt}}'''

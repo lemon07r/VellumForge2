@@ -10,13 +10,15 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/spf13/cobra"
+
 	"github.com/lamim/vellumforge2/internal/api"
 	"github.com/lamim/vellumforge2/internal/checkpoint"
 	"github.com/lamim/vellumforge2/internal/config"
+	"github.com/lamim/vellumforge2/internal/dataset"
 	"github.com/lamim/vellumforge2/internal/hfhub"
 	"github.com/lamim/vellumforge2/internal/orchestrator"
 	"github.com/lamim/vellumforge2/internal/writer"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -31,6 +33,14 @@ var (
 	uploadToHF bool
 	hfRepoID   string
 	verbose    bool
+
+	transformMode                string
+	transformInputPath           string
+	transformOutputPath          string
+	transformCheckpointPath      string
+	transformResume              bool
+	transformInputReasoningPath  string
+	transformOutputReasoningPath string
 )
 
 func main() {
@@ -91,14 +101,42 @@ high-quality Direct Preference Optimization (DPO) datasets using LLMs.`,
 	}
 
 	resumeCmd.Flags().StringVar(&configPath, "config", "config.toml", "Path to configuration file")
+	resumeCmd.Flags().StringVar(&envFile, "env-file", ".env", "Path to environment file")
+	resumeCmd.Flags().BoolVar(&uploadToHF, "upload-to-hf", false, "Upload results to Hugging Face Hub after resume completes")
+	resumeCmd.Flags().StringVar(&hfRepoID, "hf-repo-id", "", "Hugging Face repository ID (e.g., username/dataset-name) for resume uploads")
 	resumeCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 
 	checkpointCmd.AddCommand(listCmd)
 	checkpointCmd.AddCommand(inspectCmd)
 	checkpointCmd.AddCommand(resumeCmd)
 
+	transformCmd := &cobra.Command{
+		Use:   "transform",
+		Short: "Transform existing datasets (SFT→DPO, regenerate rejected responses)",
+		Long: `Transform existing JSONL datasets using the configured models.
+
+Modes:
+  - sft-to-dpo:       Convert an SFT dataset into a DPO dataset by generating rejected responses
+  - regen-rejected:   Regenerate rejected responses for an existing DPO dataset`,
+		RunE: runTransform,
+	}
+
+	transformCmd.Flags().StringVar(&configPath, "config", "config.toml", "Path to configuration file")
+	transformCmd.Flags().StringVar(&envFile, "env-file", ".env", "Path to environment file")
+	transformCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
+	transformCmd.Flags().StringVar(&transformMode, "mode", "", "Transform mode: 'sft-to-dpo' or 'regen-rejected'")
+	transformCmd.Flags().StringVar(&transformInputPath, "input", "", "Path to input JSONL dataset (non-reasoning)")
+	transformCmd.Flags().StringVar(&transformOutputPath, "output", "", "Path to output JSONL dataset (non-reasoning)")
+	transformCmd.Flags().StringVar(&transformCheckpointPath, "checkpoint", "", "Path to transform checkpoint file (defaults to derived from output paths)")
+	transformCmd.Flags().BoolVar(&transformResume, "resume", false, "Resume transform from an existing checkpoint")
+	transformCmd.Flags().StringVar(&transformInputReasoningPath, "input-reasoning", "", "Path to reasoning JSONL dataset input (optional)")
+	transformCmd.Flags().StringVar(&transformOutputReasoningPath, "output-reasoning", "", "Path to reasoning JSONL dataset output (optional)")
+
+	_ = transformCmd.MarkFlagRequired("mode")
+
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(checkpointCmd)
+	rootCmd.AddCommand(transformCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -196,10 +234,20 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create dataset writer (append mode for resume)
+	// Use dual dataset writer if reasoning capture is enabled
 	expectedRecords := cfg.Generation.NumSubtopics * cfg.Generation.NumPromptsPerSubtopic
-	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
-	if err != nil {
-		return fmt.Errorf("failed to create dataset writer: %w", err)
+	var dataWriter writer.Writer
+	if cfg.Generation.EnableReasoningCapture {
+		dataWriter, err = writer.NewDualDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
+		if err != nil {
+			return fmt.Errorf("failed to create dual dataset writer: %w", err)
+		}
+		logger.Info("Dual dataset mode enabled - will generate both regular and reasoning datasets")
+	} else {
+		dataWriter, err = writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
+		if err != nil {
+			return fmt.Errorf("failed to create dataset writer: %w", err)
+		}
 	}
 	defer func() {
 		if err := dataWriter.Close(); err != nil {
@@ -234,28 +282,82 @@ func runGeneration(cmd *cobra.Command, args []string) error {
 		"duration", stats.TotalDuration,
 		"session_dir", sessionMgr.GetSessionDir())
 
-	// Optional: Upload to Hugging Face
-	if uploadToHF {
-		if hfRepoID == "" && cfg.HuggingFace.RepoID == "" {
-			return fmt.Errorf("--hf-repo-id must be specified when using --upload-to-hf")
-		}
-
-		repoID := hfRepoID
-		if repoID == "" {
-			repoID = cfg.HuggingFace.RepoID
-		}
-
-		if secrets.HuggingFaceToken == "" {
-			return fmt.Errorf("HUGGING_FACE_TOKEN environment variable must be set for uploads")
-		}
-
-		uploader := hfhub.NewUploader(secrets.HuggingFaceToken, logger)
-		if err := uploader.Upload(repoID, sessionMgr.GetSessionDir()); err != nil {
-			return fmt.Errorf("upload failed: %w", err)
-		}
+	if err := maybeUploadToHuggingFace(cfg, secrets, sessionMgr, logger); err != nil {
+		return err
 	}
 
 	logger.Info("All done! 🎉")
+	return nil
+}
+
+// runTransform performs offline dataset transforms using existing config.toml settings.
+func runTransform(cmd *cobra.Command, args []string) error {
+	// Load environment variables from file if it exists
+	if envFile != "" {
+		if err := loadEnvFile(envFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load env file: %v\n", err)
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Loaded env file: %s\n", envFile)
+		}
+	}
+
+	// Load configuration
+	cfg, secrets, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Determine log level
+	logLevel := slog.LevelInfo
+	if verbose {
+		logLevel = slog.LevelDebug
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+
+	// Create API client
+	apiClient := api.NewClient(logger)
+
+	// Set provider-level rate limits if configured
+	if len(cfg.ProviderRateLimits) > 0 {
+		apiClient.SetProviderRateLimits(cfg.ProviderRateLimits, cfg.ProviderBurstPercent)
+		logger.Info("Provider rate limits configured", "providers", cfg.ProviderRateLimits, "burst_percent", cfg.ProviderBurstPercent)
+	}
+
+	// Parse transform mode
+	var mode dataset.TransformMode
+	switch strings.ToLower(strings.TrimSpace(transformMode)) {
+	case string(dataset.TransformSFTToDPO):
+		mode = dataset.TransformSFTToDPO
+	case string(dataset.TransformRegenRejected), "regen":
+		mode = dataset.TransformRegenRejected
+	default:
+		return fmt.Errorf("invalid transform mode: %s (valid: '%s', '%s')",
+			transformMode, dataset.TransformSFTToDPO, dataset.TransformRegenRejected)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	opts := dataset.Options{
+		InputPath:           transformInputPath,
+		OutputPath:          transformOutputPath,
+		InputReasoningPath:  transformInputReasoningPath,
+		OutputReasoningPath: transformOutputReasoningPath,
+		Concurrency:         cfg.Generation.Concurrency,
+		CheckpointPath:      transformCheckpointPath,
+		Resume:              transformResume,
+		CheckpointInterval:  cfg.Generation.CheckpointInterval,
+	}
+
+	if err := dataset.Run(ctx, logger, mode, cfg, secrets, apiClient, opts); err != nil {
+		if err == context.Canceled {
+			return fmt.Errorf("transform interrupted")
+		}
+		return err
+	}
+
+	logger.Info("Dataset transform complete")
 	return nil
 }
 
@@ -551,6 +653,15 @@ func inspectCheckpoint(cmd *cobra.Command, args []string) error {
 func resumeFromCheckpoint(cmd *cobra.Command, args []string) error {
 	sessionDir := args[0]
 
+	// Load environment variables from file if it exists
+	if envFile != "" {
+		if err := loadEnvFile(envFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load env file: %v\n", err)
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Loaded env file: %s\n", envFile)
+		}
+	}
+
 	// SECURITY: Validate session path to prevent path traversal (CWE-22)
 	if err := writer.ValidateSessionPath(sessionDir); err != nil {
 		return fmt.Errorf("invalid session directory: %w", err)
@@ -673,10 +784,20 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 	}
 
 	// Create dataset writer
+	// Use dual dataset writer if reasoning capture is enabled
 	expectedRecords := cfg.Generation.NumSubtopics * cfg.Generation.NumPromptsPerSubtopic
-	dataWriter, err := writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
-	if err != nil {
-		return fmt.Errorf("failed to create dataset writer: %w", err)
+	var dataWriter writer.Writer
+	if cfg.Generation.EnableReasoningCapture {
+		dataWriter, err = writer.NewDualDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
+		if err != nil {
+			return fmt.Errorf("failed to create dual dataset writer: %w", err)
+		}
+		logger.Info("Dual dataset mode enabled - will generate both regular and reasoning datasets")
+	} else {
+		dataWriter, err = writer.NewDatasetWriter(sessionMgr, logger, resumeMode, expectedRecords)
+		if err != nil {
+			return fmt.Errorf("failed to create dataset writer: %w", err)
+		}
 	}
 	defer func() {
 		if err := dataWriter.Close(); err != nil {
@@ -710,7 +831,37 @@ func runGenerationWithConfig(cfg *config.Config, secrets *config.Secrets) error 
 		"duration", stats.TotalDuration,
 		"session_dir", sessionMgr.GetSessionDir())
 
+	if err := maybeUploadToHuggingFace(cfg, secrets, sessionMgr, logger); err != nil {
+		return err
+	}
+
 	logger.Info("All done! 🎉")
+	return nil
+}
+
+func maybeUploadToHuggingFace(cfg *config.Config, secrets *config.Secrets, sessionMgr *writer.SessionManager, logger *slog.Logger) error {
+	if !uploadToHF {
+		return nil
+	}
+
+	if hfRepoID == "" && cfg.HuggingFace.RepoID == "" {
+		return fmt.Errorf("--hf-repo-id must be specified when using --upload-to-hf")
+	}
+
+	repoID := hfRepoID
+	if repoID == "" {
+		repoID = cfg.HuggingFace.RepoID
+	}
+
+	if secrets.HuggingFaceToken == "" {
+		return fmt.Errorf("HUGGING_FACE_TOKEN environment variable must be set for uploads")
+	}
+
+	uploader := hfhub.NewUploader(secrets.HuggingFaceToken, logger)
+	if err := uploader.Upload(repoID, sessionMgr.GetSessionDir()); err != nil {
+		return fmt.Errorf("upload failed: %w", err)
+	}
+
 	return nil
 }
 

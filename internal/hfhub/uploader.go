@@ -77,8 +77,9 @@ func (u *Uploader) Upload(repoID, sessionDir string) error {
 
 	// Prepare files for upload (dataset + config as vf2.toml)
 	filesToUpload := map[string]string{
-		"dataset.jsonl":   "dataset.jsonl",
-		"config.toml.bak": "vf2.toml", // Rename for clarity on HF Hub
+		"dataset.jsonl":           "dataset.jsonl",
+		"dataset_reasoning.jsonl": "dataset_reasoning.jsonl",
+		"config.toml.bak":         "vf2.toml", // Rename for clarity on HF Hub
 	}
 	operations := []CommitOperation{}
 	lfsFiles := []LFSPointer{}

@@ -71,7 +71,8 @@ func (dw *DatasetWriter) WriteRecord(record models.DatasetRecord) (int, error) {
 }
 
 // WriteSFTRecord writes an SFT record directly to file (bypasses buffer)
-func (dw *DatasetWriter) WriteSFTRecord(record models.SFTRecord) error {
+// reasoning parameter is ignored in single dataset mode (for interface compatibility)
+func (dw *DatasetWriter) WriteSFTRecord(record models.SFTRecord, reasoning string) error {
 	dw.mu.Lock()
 	defer dw.mu.Unlock()
 
@@ -88,7 +89,8 @@ func (dw *DatasetWriter) WriteSFTRecord(record models.SFTRecord) error {
 }
 
 // WriteDPORecord writes a DPO record directly to file (bypasses buffer)
-func (dw *DatasetWriter) WriteDPORecord(record models.DPORecord) error {
+// reasoning parameters are ignored in single dataset mode (for interface compatibility)
+func (dw *DatasetWriter) WriteDPORecord(record models.DPORecord, chosenReasoning, rejectedReasoning string) error {
 	dw.mu.Lock()
 	defer dw.mu.Unlock()
 
@@ -106,7 +108,8 @@ func (dw *DatasetWriter) WriteDPORecord(record models.DPORecord) error {
 
 // WriteKTORecord writes a KTO record directly to file (bypasses buffer)
 // KTO mode generates 2 rows per preference pair (one chosen, one rejected)
-func (dw *DatasetWriter) WriteKTORecord(record models.KTORecord) error {
+// reasoning parameter is ignored in single dataset mode (for interface compatibility)
+func (dw *DatasetWriter) WriteKTORecord(record models.KTORecord, reasoning string) error {
 	dw.mu.Lock()
 	defer dw.mu.Unlock()
 

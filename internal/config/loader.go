@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/lamim/vellumforge2/pkg/models"
 )
 
 // Load reads and parses the configuration file and environment variables
@@ -71,6 +73,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.Generation.PromptRetryAttempts == 0 {
 		cfg.Generation.PromptRetryAttempts = 2 // 2 retry attempts by default
 	}
+	if cfg.Generation.SFTFormat == "" {
+		cfg.Generation.SFTFormat = models.SFTFormatShareGPT
+	}
 
 	// Apply defaults for each model
 	for name, model := range cfg.Models {
@@ -92,6 +97,13 @@ func applyDefaults(cfg *Config) {
 		}
 		if model.MaxBackoffSeconds == 0 {
 			model.MaxBackoffSeconds = 120 // 2 minutes default
+		}
+		// Default HTTP timeout: 120 seconds
+		// For very long-form generation (>4000 tokens), set this higher (e.g., 600-1200)
+		// NOTE: HTTPTimeoutSeconds == 0 means "not set" (TOML can't distinguish 0 from unset).
+		// To effectively disable timeouts, use a very large value instead.
+		if model.HTTPTimeoutSeconds == 0 {
+			model.HTTPTimeoutSeconds = 120 // 2 minutes default
 		}
 		// Default max_retries is 3
 		// NOTE: In TOML, we can't distinguish 0 from unset, so:
