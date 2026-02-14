@@ -17,7 +17,7 @@ COLOR_YELLOW=\033[33m
 COLOR_BLUE=\033[34m
 
 define print_step
-	@echo -e "$(COLOR_BOLD)$(COLOR_BLUE)==> $(1)$(COLOR_RESET)"
+	@printf "$(COLOR_BOLD)$(COLOR_BLUE)==> $(1)$(COLOR_RESET)\n"
 endef
 
 ## all: Run all checks and build (optimal order for development)
@@ -33,7 +33,7 @@ pre-commit: fmt vet lint
 	$(call print_step,"✅ Pre-commit checks passed!")
 
 ## ci: Full CI pipeline (format check + all validations + coverage)
-ci: fmt-check vet lint test-coverage build
+ci: fmt-check vet lint test build
 	$(call print_step,"✅ CI pipeline completed successfully!")
 
 build:
@@ -59,20 +59,20 @@ build-all: build-linux build-darwin build-windows
 test:
 	$(call print_step,"Running unit tests - skips integration tests...")
 	@go test -short -race -coverprofile=coverage.out ./...
-	@echo -e "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)"
+	@printf "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)\n"
 	$(call print_step,"✓ Tests passed")
 
 test-integration:
 	$(call print_step,"Running ALL tests including integration tests - makes real API calls...")
 	@go test -race -coverprofile=coverage.out ./...
-	@echo -e "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)"
+	@printf "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)\n"
 	$(call print_step,"✓ All tests passed")
 
 test-coverage:
 	$(call print_step,"Running ALL tests with coverage report - makes real API calls...")
 	@go test -race -coverprofile=coverage.out ./...
 	@go tool cover -html=coverage.out -o coverage.html
-	@echo -e "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)"
+	@printf "$(COLOR_GREEN)Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')$(COLOR_RESET)\n"
 	$(call print_step,"✓ Coverage report generated: coverage.html")
 
 test-short:
@@ -129,13 +129,13 @@ fmt:
 	elif [ -f "$(shell go env GOPATH)/bin/goimports" ]; then \
 		$(shell go env GOPATH)/bin/goimports -w -local github.com/lamim/vellumforge2 .; \
 	else \
-		echo -e "$(COLOR_YELLOW)Warning: goimports not found, run: go install golang.org/x/tools/cmd/goimports@latest$(COLOR_RESET)"; \
+		printf "$(COLOR_YELLOW)Warning: goimports not found, run: go install golang.org/x/tools/cmd/goimports@latest$(COLOR_RESET)\n"; \
 	fi
 	$(call print_step,"✓ Code formatted")
 
 fmt-check:
 	$(call print_step,"Checking code formatting...")
-	@test -z "$$(gofmt -l .)" || (echo -e "$(COLOR_YELLOW)Files not formatted:$(COLOR_RESET)" && gofmt -l . && exit 1)
+	@test -z "$$(gofmt -l .)" || (printf "$(COLOR_YELLOW)Files not formatted:$(COLOR_RESET)\n" && gofmt -l . && exit 1)
 	$(call print_step,"✓ Code formatting check passed")
 
 vet:
@@ -144,22 +144,22 @@ vet:
 	$(call print_step,"✓ Go vet passed")
 
 help:
-	@echo -e "$(COLOR_BOLD)VellumForge2 Makefile Commands$(COLOR_RESET)"
+	@printf "$(COLOR_BOLD)VellumForge2 Makefile Commands$(COLOR_RESET)\n"
 	@echo ""
-	@echo -e "$(COLOR_BOLD)Primary Commands:$(COLOR_RESET)"
-	@echo -e "  $(COLOR_GREEN)make all$(COLOR_RESET)          - Run full pipeline: deps → fmt → vet → lint → test → build"
-	@echo -e "  $(COLOR_GREEN)make check$(COLOR_RESET)        - Run quality checks without building (faster)"
-	@echo -e "  $(COLOR_GREEN)make pre-commit$(COLOR_RESET)   - Quick checks before committing (fmt → vet → lint)"
-	@echo -e "  $(COLOR_GREEN)make ci$(COLOR_RESET)           - Full CI pipeline with coverage"
+	@printf "$(COLOR_BOLD)Primary Commands:$(COLOR_RESET)\n"
+	@printf "  $(COLOR_GREEN)make all$(COLOR_RESET)          - Run full pipeline: deps → fmt → vet → lint → test → build\n"
+	@printf "  $(COLOR_GREEN)make check$(COLOR_RESET)        - Run quality checks without building (faster)\n"
+	@printf "  $(COLOR_GREEN)make pre-commit$(COLOR_RESET)   - Quick checks before committing (fmt → vet → lint)\n"
+	@printf "  $(COLOR_GREEN)make ci$(COLOR_RESET)           - Full CI pipeline with coverage\n"
 	@echo ""
-	@echo -e "$(COLOR_BOLD)Build Commands:$(COLOR_RESET)"
+	@printf "$(COLOR_BOLD)Build Commands:$(COLOR_RESET)\n"
 	@echo "  make build           - Build binary for current platform"
 	@echo "  make build-all       - Build for all platforms (Linux, macOS, Windows)"
 	@echo "  make build-linux     - Build for Linux amd64"
 	@echo "  make build-darwin    - Build for macOS (amd64 + arm64)"
 	@echo "  make build-windows   - Build for Windows amd64"
 	@echo ""
-	@echo -e "$(COLOR_BOLD)Quality Commands:$(COLOR_RESET)"
+	@printf "$(COLOR_BOLD)Quality Commands:$(COLOR_RESET)\n"
 	@echo "  make fmt             - Format code with gofmt and goimports"
 	@echo "  make fmt-check       - Check if code is formatted (CI)"
 	@echo "  make vet             - Run go vet"
@@ -167,21 +167,21 @@ help:
 	@echo "  make lint-fix        - Run golangci-lint with auto-fix"
 	@echo "  make security        - Run security checks (gosec)"
 	@echo ""
-	@echo -e "$(COLOR_BOLD)Test Commands:$(COLOR_RESET)"
+	@printf "$(COLOR_BOLD)Test Commands:$(COLOR_RESET)\n"
 	@echo "  make test            - Run unit tests (fast, skips integration tests)"
 	@echo "  make test-integration - Run ALL tests including integration tests (slow, makes API calls)"
 	@echo "  make test-coverage   - Run ALL tests and generate HTML coverage report (slow)"
 	@echo "  make test-short      - Alias for 'make test'"
 	@echo "  make test-verbose    - Run tests with verbose output"
 	@echo ""
-	@echo -e "$(COLOR_BOLD)Utility Commands:$(COLOR_RESET)"
+	@printf "$(COLOR_BOLD)Utility Commands:$(COLOR_RESET)\n"
 	@echo "  make deps            - Verify and download dependencies"
 	@echo "  make install         - Install and tidy dependencies"
 	@echo "  make clean           - Remove build artifacts and coverage files"
 	@echo "  make run             - Run with example config"
 	@echo "  make help            - Show this help message"
 	@echo ""
-	@echo -e "$(COLOR_BOLD)Examples:$(COLOR_RESET)"
+	@printf "$(COLOR_BOLD)Examples:$(COLOR_RESET)\n"
 	@echo "  make all             # Run everything before pushing"
 	@echo "  make pre-commit      # Quick check before commit"
 	@echo "  make test-coverage   # Generate coverage report"
