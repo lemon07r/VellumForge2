@@ -32,7 +32,7 @@ check: fmt-check vet lint test
 pre-commit: fmt vet lint
 	$(call print_step,"✅ Pre-commit checks passed!")
 
-## ci: Full CI pipeline (format check + all validations + coverage)
+## ci: Full CI pipeline (format check + all validations + unit tests + build)
 ci: fmt-check vet lint test build
 	$(call print_step,"✅ CI pipeline completed successfully!")
 
@@ -150,7 +150,7 @@ help:
 	@printf "  $(COLOR_GREEN)make all$(COLOR_RESET)          - Run full pipeline: deps → fmt → vet → lint → test → build\n"
 	@printf "  $(COLOR_GREEN)make check$(COLOR_RESET)        - Run quality checks without building (faster)\n"
 	@printf "  $(COLOR_GREEN)make pre-commit$(COLOR_RESET)   - Quick checks before committing (fmt → vet → lint)\n"
-	@printf "  $(COLOR_GREEN)make ci$(COLOR_RESET)           - Full CI pipeline with coverage\n"
+	@printf "  $(COLOR_GREEN)make ci$(COLOR_RESET)           - Full CI pipeline (unit tests + build)\n"
 	@echo ""
 	@printf "$(COLOR_BOLD)Build Commands:$(COLOR_RESET)\n"
 	@echo "  make build           - Build binary for current platform"
